@@ -1,0 +1,234 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{tikz}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{comment}
+\usepackage[none]{hyphenat}
+
+\newtheoremstyle
+  {break}% name
+  {\topsep}% above space
+  {\topsep}% below space
+  {}% body font
+  {}% indent
+  {\bfseries}% head font
+  {}% headpunct
+  {\newline}%head space
+  {}% custom head spec
+\theoremstyle{break}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{notation}[theorem]{Notation}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{conjecture}[theorem]{Conjecture}
+\newtheorem{question}[theorem]{Question}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{note}[theorem]{Note}
+\newtheorem*{remark}{Remark}
+
+\renewcommand\labelenumi{(\roman{enumi})}
+\renewcommand\theenumi\labelenumi
+\title{Models of computation}
+\author{Gabriel Le Dain}
+\date{March 2025}
+
+\begin{document}
+\title{Models of computation}
+\maketitle
+
+\section{Finite automata}
+
+\subsection{Finite automata}
+\begin{definition}[Finite automaton]
+\label{def:finite-automaton}
+A \textbf{finite automaton}, or \textbf{fintite state machine} (sometimes just \textbf{state machine}) is a $5$-tuple $(Q,\Sigma,\delta,q_0,F)$ where
+\begin{enumerate}
+    \item $Q$ is a finite set called the \textit{states}
+    \item $\Sigma$ is a finite set called the \textit{alphabet}
+    \item $\delta: Q\times\Sigma \to \Sigma$ is the \textit{transition function}
+    \item $q_0\in Q$ is the \textit{start state}
+    \item $F \subseteq Q$ is the set of \textit{final states} or \textit{accept states} 
+\end{enumerate}
+\end{definition}
+
+\begin{notation}[Words over an alphabet]
+\label{not:words}
+Let $\Sigma$ be a set. The set of all words over $\Sigma$ is denoted by $\Sigma^*$.
+This set of words always contains the empty string.
+\end{notation}
+
+\begin{notation}[Augmentation of an alphabet]
+\label{not:augmentation}
+For any alphabet $\Sigma$, we define the \textbf{augmentation} of $\Sigma$ as
+\[\Sigma_{\varepsilon} := \Sigma \cup \{\varepsilon\}\]
+where $\varepsilon$ is a formal symbol not in $\Sigma$.
+We think of $\varepsilon$ as the empty string.
+\end{notation}
+
+\begin{definition}[Augmentation map]
+\label{def:augmentation-map}
+For any alphabet $\Sigma$, we define the augmentation map by
+\[\textrm{aug}: \Sigma_{\varepsilon}* \to \Sigma^*\]
+\[\textrm{aug}(\varepsilon) = \text{the empty string}\]
+\[\textrm{aug}(a) = a \text{ for all } a\in \Sigma \]
+extended to words over $\Sigma$ in the obvious way.
+\end{definition}
+
+\begin{definition}[Language]
+A language over a set $\Sigma$ is some subset of $\Sigma^*$
+\end{definition}
+
+\begin{definition}[Accept]
+\label{def:finite-automaton-accept}
+Let $M=(Q,\Sigma,\delta,q_0,F)$ be a finite automation and $w = w_1w_2\ldots w_n$ be a word over $\Sigma$. 
+We say that $M$ \textbf{accepts} $w$ if there exist $r_0, r_1, \ldots, r_n$ in $Q$ such that
+\begin{enumerate}
+  \item $r_0=q_0$
+  \item $r_{i+1} = \delta(r_i, w_{i+1})$ for all $i = 0,1,\ldots, n-1$
+  \item $r_n\in F$
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Recognise]
+\label{def:recognise}
+Let $M=(Q,\Sigma,\delta,q_0,F)$ be a finite automaton.
+We say that $M$ \textbf{recognises} the language 
+\[L(M) := \{w \in \Sigma^*: M \text{ accepts } w\}\]
+\end{definition}
+
+\subsection{Regular languages}
+\begin{definition}[Regular language]
+\label{def:regular-language}
+We say that a language $A$ over a set $\Sigma$ is a $\textbf{regular language}$ if there exists some finite automation $M$ with $\Sigma$ as its alphabet such that $M$ recognises $A$.
+\end{definition}
+
+\begin{definition}{Non-deterministic finite automaton}
+\label{def:nondeterministic-finite-automaton}
+A \textbf{non-deterministic finite automaton} is a $5$-tuple $(Q,\Sigma,\delta,q_0,F)$ where
+\begin{enumerate}
+    \item $Q$ is a finite set called the \textit{states}
+    \item $\Sigma$ is a finite set called the \textit{alphabet}
+    \item $\delta: Q\times\Sigma \to \mathcal{P}(Q)$ is the \textit{transition function}
+    \item $q_0\in Q$ is the \textit{start state}
+    \item $F \subseteq Q$ is the set of \textit{final states} or \textit{accept states} 
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Accept]
+\label{def:nondeterministic-finite-automaton-accept}
+et $M=(Q,\Sigma,\delta,q_0,F)$ be a non-deterministic finite automaton and $w = w_1w_2\ldots w_n$ be a word over $\Sigma$. 
+We say that $M$ \textbf{accepts} $w$ if there exist $r_0, r_1, \ldots, r_n$ in $Q$ such that
+\begin{enumerate}
+  \item $r_0=q_0$
+  \item $r_{i+1} \in \delta(r_i, w_{i+1})$ for all $i = 0,1,\ldots, n-1$
+  \item $r_n\in F$
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[$\varepsilon$-Non-deterministic finite automaton]
+\label{def:epsilon-nondeterministic-finite-automaton}
+  An \textbf{$\varepsilon$-non-deterministic finite automaton} is a $5$-tuple $(Q,\Sigma,\delta,q_0,F)$ where
+  \begin{enumerate}
+      \item $Q$ is a finite set called the \textit{states}
+      \item $\Sigma$ is a finite set called the \textit{alphabet}
+      \item $\delta: Q\times\Sigma_{\varepsilon} \to \mathcal{P}(Q)$ is the \textit{transition function}
+      \item $q_0\in Q$ is the \textit{start state}
+      \item $F \subseteq Q$ is the set of \textit{final states} or \textit{accept states} 
+  \end{enumerate}
+\end{definition}
+
+
+\begin{definition}[Accept]
+\label{def:epsilon-nondeterministic-finite-automaton-accept-aug}
+Let $M:=(Q,\Sigma,\delta,q_0,F)$ be an $\varepsilon$-nondeterministic finite automaton.
+We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $w':=w_0w_1\ldots w_n \in\Sigma_{\varepsilon}^*$ and $r_0,r_1,\ldots,r_n \in Q$ such that $\textrm{aug}(w')=w$ and
+  \begin{enumerate}
+    \item $r_0=q_0$
+    \item $r_{i+1} \in \delta(r_i, w_{i+1})$ for all $i = 0,1,\ldots, n-1$
+    \item $r_n\in F$
+  \end{enumerate}
+\end{definition}
+
+\begin{definition}[Accept]
+  \label{def:epsilon-nondeterministic-finite-automaton-accept}
+  Let $M:=(Q,\Sigma,\delta,q_0,F)$ be an $\varepsilon$-nondeterministic finite automaton.
+  We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $w:=w_1w_2\ldots w_n \in\Sigma^*$, $k_1, k_2, \ldots, k_n \in \mathbb{N}$ and $r_0,\ldots,r_n\in Q$ such that
+    \begin{enumerate}
+      \item $r_0=q_0, k_1=1$
+      \item For all $i = 0,1,\ldots, n-1$, we have one of:
+      \begin{enumerate}
+        \item $r_{i+1} \in \delta(r_i, w_{k_{i+1}})$ and $k_{i+1}=k_i+1$
+        \item $r_{i+1} \in \delta(r_i, \varepsilon)$ and $k_{i+1}=k_i$
+      \end{enumerate}
+      \item $r_n\in F$
+    \end{enumerate}
+\end{definition}
+
+\begin{remark}
+  The definitions \ref{def:epsilon-nondeterministic-finite-automaton-accept} and \ref{def:epsilon-nondeterministic-finite-automaton-accept-aug} are equivalent by thinking about them for a second or two.
+  However \ref{def:epsilon-nondeterministic-finite-automaton-accept} is more suited to implementation in a programming language.
+\end{remark}
+
+\begin{definition}[Regular operations]
+\label{def:regular-operation}
+Let $\Sigma$ be some alphabet. 
+We define three \textbf{regular operations} on languages:
+\begin{enumerate}
+  \item Union: $A \cup B$
+  \item Concatenation: $A \circ B := \{ab: a\in A, b\in B\}$
+  \item Kleene star: $A^* :=\{x_ax_2\ldots x_n \text{ where } x_1,x_2,\ldots,x_n\in A\}$
+\end{enumerate}
+\end{definition}
+
+\begin{note}
+\label{note:Kleene-star-compatible}
+Note that the definition of the Kleene star on a language above is compatible with its use to denote the set of words over some alphabet.
+\end{note}
+
+\begin{proposition}[Unions of regular languages are regular]
+\label{prop:union-of-regular-languages-regular}
+Let $A$, $B$ be regular languages over the same alphabet $\Sigma$. 
+Then $A\cup B$ is also regular.
+\end{proposition}
+
+\begin{proof}
+\label{prf:union-of-regular-languages-regular}
+Since $A$, $B$ are regular, they are recognised by finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
+Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
+\begin{itemize}
+  \item $Q^3 := Q^1 \times Q^2$
+  \item $\delta^3((s^1, s^2), a) = (\delta^1(s^1,a). \delta^2(s^2, a))$
+  \item $q^3_0 = (q^1_0, q^2_0)$
+  \item $F^3 := \left(F^1\times Q^2\right) \cup \left(Q^1\times F^2\right)$
+\end{itemize}
+Then $M_3$ recognises $A\cup B$.
+\end{proof}
+
+\begin{proposition}[Intersections of regular languages are regular]
+\label{prop:intersection-of-regular-languages-regular}
+  Let $A$, $B$ be regular languages over the same alphabet $\Sigma$. 
+  Then $A\cap B$ is also regular.
+\end{proposition}
+
+\begin{proof}
+\label{prf:intersection-of-regular-languages-regular}
+  Since $A$, $B$ are regular, they are recognised by finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
+  Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
+  \begin{itemize}
+    \item $Q^3 := Q^1 \times Q^2$
+    \item $\delta^3((s^1, s^2), a) = (\delta^1(s^1,a). \delta^2(s^2, a))$
+    \item $q^3_0 = (q^1_0, q^2_0)$
+    \item $F^3 := F^1\times F^2$
+  \end{itemize}
+  Then $M_3$ recognises $A\cap B$.
+\end{proof}
+
+\end{document}
