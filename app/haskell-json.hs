@@ -1,6 +1,13 @@
 import Data.Map (Map)
 --import qualified Data.Set as Set
-import Data.Set.Monad
+import qualified Data.Set.Monad as Set--implements monad on Set
+import Control.Applicative
+import Control.Monad
+
+--Set.Monad doesn't export cartesianProduct, so we'll have to do it ourselves
+--Definition taken from https://hackage.haskell.org/package/containers-0.8/docs/Data-Set.html#v:cartesianProduct
+cartesianProduct :: (Ord t, Ord s) => Set.Set t -> Set.Set s -> Set.Set (t,s)
+cartesianProduct xs ys = Set.fromList $ Control.Applicative.liftA2 (,) (Set.toList xs) (Set.toList ys)
 
 data Json = Null 
     | JsonBool Bool 
@@ -30,8 +37,8 @@ compute (StateMachine t i a)  = foldr t i
 accept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 accept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
 
-stateProduct :: StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
-stateProduct (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (Set.cartesianProduct a1 a2) where
+stateProduct :: (Ord states1, Ord states2) => StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
+stateProduct (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (cartesianProduct a1 a2) where
     transition w (state1, state2) = (t1 w state1, t2 w state2)
 
 
@@ -44,8 +51,9 @@ data NDStateMachine states alphabet = NDStateMachine {
 
 ndcompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndcompute (NDStateMachine t i as)  = foldr flattenedTransition  (return i)  where
-    flattenedTransition a = (join . fmap (ndtransitionFunction a))
---need to import SetMonad
+    flattenedTransition a = join . fmap (t a)
+
+
 
 
 main :: IO ()
