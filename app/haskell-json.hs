@@ -3,6 +3,7 @@ import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Applicative
 import Control.Monad
+import Data.Maybe
 
 --Set.Monad doesn't export cartesianProduct, so we'll have to do it ourselves
 --Definition taken from https://hackage.haskell.org/package/containers-0.8/docs/Data-Set.html#v:cartesianProduct
@@ -17,6 +18,7 @@ data Json = Null
     | JsonDict (Map String Json)  
     deriving (Show)
 
+
 contains :: (Eq a) => [a] -> a -> Bool
 contains xs c = foldr (\current acc -> acc || (current == c || acc) ) False xs
 
@@ -28,8 +30,18 @@ data StateMachine states alphabet = StateMachine {
     acceptStates :: Set.Set states
 }
 
+consecutivePairs :: [a] -> Maybe [(a,a)]
+consecutivePairs [] = Nothing
+consecutivePairs [_a] = Nothing
+consecutivePairs [a1,a2] = Just [(a1,a2)]
+consecutivePairs (a1:a2:as) = Just ((a1,a2) : fromMaybe [] (consecutivePairs $ a2:as) )
+
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
-compute (StateMachine t i a)  = foldr t i 
+compute (StateMachine t i _a)  = foldr t i
+
+--exhibit :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+--exhibit (StateMachine t i a) [] [j] = i==j
+--exhibit (StateMachine t i a) (alph:alphs) (s:ss) = exhibit (StateMachine t i a) (alphs) (ss) 
 
 accept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 accept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
@@ -45,9 +57,8 @@ data NDStateMachine states alphabet = NDStateMachine {
     ndacceptStates :: Set.Set states
 }
 
-
 ndcompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
-ndcompute (NDStateMachine t i as)  = foldr flattenedTransition  (return i)  where
+ndcompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
     flattenedTransition bs = join . fmap (t bs)
 
 subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
@@ -58,6 +69,7 @@ ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
 ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
     expandedTransition b = return . t b  
 
-main :: IO ()
-main =
-    print (contains " a bcd  " ' ')
+data Augmented alphabet = Augmented alphabet | Epsilon
+
+main :: IO()
+main = print (consecutivePairs ["aa", "bb", "c", "e"])
