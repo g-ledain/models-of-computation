@@ -17,11 +17,8 @@ data Json = Null
     | JsonDict (Map String Json)  
     deriving (Show)
 
-stripWhitespace :: String -> String
-stripWhitespace xs = xs >>= ( \ x -> if x == ' ' then "" else [x])
-
 contains :: (Eq a) => [a] -> a -> Bool
-contains xs c = foldr (\current -> \acc -> if acc then True else current == c || acc ) False xs
+contains xs c = foldr (\current acc -> acc || (current == c || acc) ) False xs
 
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
@@ -51,10 +48,15 @@ data NDStateMachine states alphabet = NDStateMachine {
 
 ndcompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndcompute (NDStateMachine t i as)  = foldr flattenedTransition  (return i)  where
-    flattenedTransition a = join . fmap (t a)
+    flattenedTransition bs = join . fmap (t bs)
 
+subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
+subsetConstruction (NDStateMachine t i as) = StateMachine flattenedTransition (return i) (return as) where
+    flattenedTransition bs = join . fmap (t bs)
 
-
+ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
+ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
+    expandedTransition b = return . t b  
 
 main :: IO ()
 main =
