@@ -1,26 +1,20 @@
 import Data.Map (Map)
---import qualified Data.Set as Set
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Applicative
-import Control.Monad
-import Data.Maybe
 
 --Set.Monad doesn't export cartesianProduct, so we'll have to do it ourselves
 --Definition taken from https://hackage.haskell.org/package/containers-0.8/docs/Data-Set.html#v:cartesianProduct
 cartesianProduct :: (Ord t, Ord s) => Set.Set t -> Set.Set s -> Set.Set (t,s)
 cartesianProduct xs ys = Set.fromList $ Control.Applicative.liftA2 (,) (Set.toList xs) (Set.toList ys)
 
-data Json = Null 
-    | JsonBool Bool 
-    | JsonString String 
-    | JsonFloat Float 
-    | JsonList [Json] 
-    | JsonDict (Map String Json)  
+data Json = Null
+    | JsonBool Bool
+    | JsonString String
+    | JsonFloat Float
+    | JsonList [Json]
+    | JsonDict (Map String Json)
     deriving (Show)
 
-
-contains :: (Eq a) => [a] -> a -> Bool
-contains xs c = foldr (\current acc -> acc || (current == c || acc) ) False xs
 
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
@@ -30,18 +24,32 @@ data StateMachine states alphabet = StateMachine {
     acceptStates :: Set.Set states
 }
 
-consecutivePairs :: [a] -> Maybe [(a,a)]
-consecutivePairs [] = Nothing
-consecutivePairs [_a] = Nothing
-consecutivePairs [a1,a2] = Just [(a1,a2)]
-consecutivePairs (a1:a2:as) = Just ((a1,a2) : fromMaybe [] (consecutivePairs $ a2:as) )
+shiftFront :: [a] -> [Maybe a]
+shiftFront xs = Nothing : fmap Just xs
+
+append :: a->[a]->[a]
+append x = foldr (:) [x]
+
+shiftEnd :: [a] -> [Maybe a]
+shiftEnd xs = append Nothing (fmap Just xs)
+
+consecutivePairs :: [a] -> [(Maybe a, Maybe a)]
+consecutivePairs xs = zip (shiftFront xs) (shiftEnd xs)
 
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
-compute (StateMachine t i _a)  = foldr t i
+compute (StateMachine transition initial _accept)  = foldr transition initial
 
---exhibit :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
---exhibit (StateMachine t i a) [] [j] = i==j
---exhibit (StateMachine t i a) (alph:alphs) (s:ss) = exhibit (StateMachine t i a) (alphs) (ss) 
+oneStep :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+oneStep (StateMachine _t  initial _acceptSet) (_letter, (Nothing, Just state)) = state == initial
+oneStep (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStep (StateMachine _t _initial acceptSet) (_letter,  (Just state, Nothing)) = Set.member state acceptSet
+oneStep (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False
+
+--checks whether the given sequence of states exhibits the computation of the state machine on the given word
+exhibit :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibit machine word states = all (oneStep machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
+
 
 accept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 accept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
@@ -50,26 +58,42 @@ stateProduct :: (Ord states1, Ord states2) => StateMachine states1 alphabet -> S
 stateProduct (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (cartesianProduct a1 a2) where
     transition w (state1, state2) = (t1 w state1, t2 w state2)
 
-
 data NDStateMachine states alphabet = NDStateMachine {
-    ndtransitionFunction :: alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
-    ndinitialState :: states,
-    ndacceptStates :: Set.Set states
+    ndTransitionFunction :: alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
+    ndInitialState :: states,
+    ndAcceptStates :: Set.Set states
 }
 
-ndcompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
-ndcompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
-    flattenedTransition bs = join . fmap (t bs)
+ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
+ndCompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
+    flattenedTransition bs = (t bs =<<)
 
 subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
 subsetConstruction (NDStateMachine t i as) = StateMachine flattenedTransition (return i) (return as) where
-    flattenedTransition bs = join . fmap (t bs)
+    flattenedTransition bs = (t bs =<<)
 
 ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
 ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
-    expandedTransition b = return . t b  
+    expandedTransition b = return . t b
 
 data Augmented alphabet = Augmented alphabet | Epsilon
 
+data EpsilonNDStateMachine states alphabet = EpsilonNDStateMachine {
+    epsilonNdTransitionFunction :: Augmented alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
+    episilonNdInitialState :: states,
+    epsilonNdAcceptStates :: Set.Set states
+}
+
+--iterate until output stabilises
+stabilise :: (Ord b) => (b -> Set.Set b) -> b -> Set.Set b
+stabilise b bs = Set.empty
+
+--takes the epsilon closure of a state under the given transition function
+epsilonClosure :: (Ord states) => (Augmented alphabet -> states -> Set.Set states) -> states -> Set.Set states
+epsilonClosure transition = stabilise (transition Epsilon)
+
+--unfold :: (b -> Maybe (a, b)) -> b -> [a]
+
+
 main :: IO()
-main = print (consecutivePairs ["aa", "bb", "c", "e"])
+main = print (consecutivePairs ["test1", "test2"])
