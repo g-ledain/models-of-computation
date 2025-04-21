@@ -17,7 +17,6 @@ data Json = Null
     | JsonDict (Map String Json)
     deriving (Show)
 
-
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
 data StateMachine states alphabet = StateMachine {
@@ -38,32 +37,65 @@ shiftEnd xs = append Nothing (fmap Just xs)
 consecutivePairs :: [a] -> [(Maybe a, Maybe a)]
 consecutivePairs xs = zip (shiftFront xs) (shiftEnd xs)
 
-oneStep :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-oneStep (StateMachine _t  initial _acceptSet) (_letter, (Nothing, Just state)) = state == initial
-oneStep (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
-oneStep (StateMachine _t _initial acceptSet) (_letter,  (Just state, Nothing)) = Set.member state acceptSet
-oneStep (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
+-- verifies that a single step is accepted by a state machine
+-- we use a tuple type here to avoid some awkward partial specialisation + currying later
+oneStepSuccess :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+oneStepSuccess (StateMachine _t  initial _acceptSet) (_letter, (Nothing, Just state)) = state == initial
+oneStepSuccess (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStepSuccess (StateMachine _t _initial acceptSet) (_letter,  (Just state, Nothing)) = Set.member state acceptSet
+oneStepSuccess (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
---checks whether the given sequence of states exhibits the computation of the state machine on the given word
-exhibit :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibit machine word states = all (oneStep machine) transitionPairs where
+-- verifies a single step of computation by a state machine
+oneStepCompute :: (Eq states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+oneStepCompute _ (_, (Nothing, Just _ )) = True
+oneStepCompute (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStepCompute _ (_,  (Just _, Nothing)) = True
+oneStepCompute (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
+
+-- Checks whether the given sequence of states exhibits the computation of the state machine on the given word
+exhibitCompute :: (Eq states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitCompute machine word states = all (oneStepCompute machine) transitionPairs where
     transitionPairs = zip word (consecutivePairs states)
 
-compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
-compute (StateMachine transition initial _accept)  = foldr transition initial
+-- Checks whether the given sequence of states exhibits the *succesful* computation of the state machine on the given word
+-- This is the "mathematical" definition of a state machine accepting a word, where the sequence of states required to exist
+-- is supplied as an argument
+-- (This is likely horribly inefficient - we have to check a condition at the *end* of the
+-- input, so a singly linked list is probably not a good choice of data structure here
+-- Notice that we traverse the entire list to compute consecutiePairs, traverse it again 
+-- for the zip, and then again for the all)
+exhibitSuccess:: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitSuccess machine word states = all (oneStepSuccess machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
 
+
+-- computes the outcome of a state machine 
+compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
+compute (StateMachine transition initial _accept) word  = foldr transition initial word
+
+computeUnfold :: StateMachine states alphabet -> [alphabet] -> ([states], states)
+computeUnfold (StateMachine t i a) word = runningFoldr t i word
+
+-- law: snd . computeUnfold == compute
+
+-- Checks whether a state machine accepts a word
 accept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 accept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
+
+-- it might be nice to have a version of compute and accept which provides the Boolean output and 
+-- additionally "unfolds" the sequence of states into a list
 
 
 -- we should have the following laws:
 -- exhibit machine word states == accept machine word
 -- exhibit (StateMachine transition initial acceptSet) word states == Set.Member (compute (StateMachine transition initial acceptSet) word) acceptSet
+-- TODO: add more laws here
 
 stateProduct :: (Ord states1, Ord states2) => StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
 stateProduct (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (cartesianProduct a1 a2) where
     transition w (state1, state2) = (t1 w state1, t2 w state2)
 
+-- non-deterministic state machine
 data NDStateMachine states alphabet = NDStateMachine {
     ndTransitionFunction :: alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
     ndInitialState :: states,
@@ -74,37 +106,55 @@ ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set
 ndCompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
     flattenedTransition bs = (t bs =<<)
 
+ndAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
+ndAccept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
+
+-- turns non-deterministic state machine into equivalent state machine
 subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
 subsetConstruction (NDStateMachine t i as) = StateMachine flattenedTransition (return i) (return as) where
     flattenedTransition bs = (t bs =<<)
 
+-- inclusion of state machines into non-deterministic state machines
 ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
 ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
     expandedTransition b = return . t b
 
 data Augmented alphabet = Augmented alphabet | Epsilon
 
+-- variant of non-deterministic state machine with "null" paths
+-- note that this is not equivalent to a non-deterministic state machine over arbitrary types
+-- because taking the epsilon-closure may not be computable 
 data EpsilonNDStateMachine states alphabet = EpsilonNDStateMachine {
     epsilonNdTransitionFunction :: Augmented alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
     episilonNdInitialState :: states,
     epsilonNdAcceptStates :: Set.Set states
 }
 
-stabiliseList :: (Eq b) => (b -> [b]) -> b -> [b]
-stabiliseList func b = join (stabiliseFunc (join . fmap func ) [b])
-
+-- iterates a function until a fixed point is reached
 stabiliseFunc :: (Eq a) => (a -> a) -> a -> [a]
 stabiliseFunc f x = unfoldr (\ y -> if f y == y then Nothing else Just (f y, y)) x
 
---iterate until output stabilises
---this is a horrible definition - should be able to do this "natively" on lists
---I've not got a good handle on how to generalise unfold yet...
+-- iterate and put values into list until output stabilises
+stabiliseList :: (Eq b) => (b -> [b]) -> b -> [b]
+stabiliseList func b = join (stabiliseFunc (join . fmap func ) [b])
+
+-- iterate and put values into set until output stabilises
+-- *This is a horrible definition - should be able to do this "natively" on sets
+-- I've not got a good handle on how to generalise unfold yet...)
 stabilise :: (Ord b) => (b -> Set.Set b) -> b -> Set.Set b
 stabilise function element = Set.fromList (stabiliseList (Set.toList . function) element)
 
---takes the epsilon closure of a state under the given transition function
+-- takes the epsilon closure of a state under the given transition function
 epsilonClosure :: (Ord states) => (Augmented alphabet -> states -> Set.Set states) -> states -> Set.Set states
 epsilonClosure transition = stabilise (transition Epsilon)
 
+-- performs a foldr and puts intermediate values into a list
+runningFoldr :: (a -> b -> b) -> b -> [a] -> ([b],b)
+runningFoldr _trans start [] = ([], start)
+runningFoldr trans start (b:bs) = (trans b start: fst (runningFoldr trans (trans b start) bs), trans b start)
+
+squareAdd :: Int -> Int -> Int
+squareAdd x y = x*x + y
+
 main :: IO()
-main = print (consecutivePairs ["test1", "test2"])
+main = print (runningFoldr squareAdd 0 [1, 2, 3, 4])
