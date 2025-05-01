@@ -73,8 +73,14 @@ exhibitSuccess machine word states = all (oneStepSuccess machine) transitionPair
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
 compute (StateMachine transition initial _accept) word  = foldr transition initial word
 
+-- performs a foldr and puts intermediate values into a list
+-- general recursion code smell, but I couldn't figure out another way to write this
+runningFoldr :: (a -> b -> b) -> b -> [a] -> ([b],b)
+runningFoldr _trans start [] = ([], start)
+runningFoldr trans start (b:bs) = (trans b start: fst (runningFoldr trans (trans b start) bs), trans b start)
+
 computeUnfold :: StateMachine states alphabet -> [alphabet] -> ([states], states)
-computeUnfold (StateMachine t i a) word = runningFoldr t i word
+computeUnfold (StateMachine t i _a) word = runningFoldr t i word
 
 -- law: snd . computeUnfold == compute
 
@@ -102,9 +108,18 @@ data NDStateMachine states alphabet = NDStateMachine {
     ndAcceptStates :: Set.Set states
 }
 
+ndExhibitCompute :: NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+ndExhibitCompute = undefined
+
+ndExhibitSuccess :: NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+ndExhibitSuccess = undefined
+
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndCompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
     flattenedTransition bs = (t bs =<<)
+
+ndComputeUnfold :: NDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
+ndComputeUnfold = undefined
 
 ndAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 ndAccept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
@@ -136,10 +151,10 @@ stabiliseFunc f x = unfoldr (\ y -> if f y == y then Nothing else Just (f y, y))
 
 -- iterate and put values into list until output stabilises
 stabiliseList :: (Eq b) => (b -> [b]) -> b -> [b]
-stabiliseList func b = join (stabiliseFunc (join . fmap func ) [b])
+stabiliseList func b = join (stabiliseFunc (join . fmap func) [b])
 
 -- iterate and put values into set until output stabilises
--- *This is a horrible definition - should be able to do this "natively" on sets
+-- This is a horrible definition - should be able to do this "natively" on sets
 -- I've not got a good handle on how to generalise unfold yet...)
 stabilise :: (Ord b) => (b -> Set.Set b) -> b -> Set.Set b
 stabilise function element = Set.fromList (stabiliseList (Set.toList . function) element)
@@ -148,13 +163,23 @@ stabilise function element = Set.fromList (stabiliseList (Set.toList . function)
 epsilonClosure :: (Ord states) => (Augmented alphabet -> states -> Set.Set states) -> states -> Set.Set states
 epsilonClosure transition = stabilise (transition Epsilon)
 
--- performs a foldr and puts intermediate values into a list
-runningFoldr :: (a -> b -> b) -> b -> [a] -> ([b],b)
-runningFoldr _trans start [] = ([], start)
-runningFoldr trans start (b:bs) = (trans b start: fst (runningFoldr trans (trans b start) bs), trans b start)
+epsilonNdExhibitCompute :: EpsilonNDStateMachine states alphabet -> [alphebet] -> [states] -> Bool
+epsilonNdExhibitCompute = undefined
+
+epsilonNdExhibitSuccess :: EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+epsilonNdExhibitSuccess = undefined
+
+epsilonNdCompute :: EpsilonNDStateMachine states alphabet -> [alphabet] -> Set.Set states
+epsilonNdCompute = undefined
+
+epsilonNdComputeUnfold :: EpsilonNDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
+epsilonNdComputeUnfold = undefined
+
+epsilonNdAccept :: EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
+epsilonNdAccept = undefined
 
 squareAdd :: Int -> Int -> Int
 squareAdd x y = x*x + y
 
 main :: IO()
-main = print (runningFoldr squareAdd 0 [1, 2, 3, 4])
+main = print (runningFoldr squareAdd 0 [1, 2, 3, 4]) 
