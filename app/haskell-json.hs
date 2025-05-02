@@ -39,11 +39,11 @@ consecutivePairs xs = zip (shiftFront xs) (shiftEnd xs)
 
 -- verifies that a single step is accepted by a state machine
 -- we use a tuple type here to avoid some awkward partial specialisation + currying later
-oneStepSuccess :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-oneStepSuccess (StateMachine _t  initial _acceptSet) (_letter, (Nothing, Just state)) = state == initial
-oneStepSuccess (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
-oneStepSuccess (StateMachine _t _initial acceptSet) (_letter,  (Just state, Nothing)) = Set.member state acceptSet
-oneStepSuccess (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
+oneStepAccept :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+oneStepAccept (StateMachine _t  initial _acceptSet) (_letter, (Nothing, Just state)) = state == initial
+oneStepAccept (StateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStepAccept (StateMachine _t _initial acceptSet) (_letter,  (Just state, Nothing)) = Set.member state acceptSet
+oneStepAccept (StateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 -- verifies a single step of computation by a state machine
 oneStepCompute :: (Eq states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
@@ -64,10 +64,9 @@ exhibitCompute machine word states = all (oneStepCompute machine) transitionPair
 -- input, so a singly linked list is probably not a good choice of data structure here
 -- Notice that we traverse the entire list to compute consecutiePairs, traverse it again 
 -- for the zip, and then again for the all)
-exhibitSuccess:: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitSuccess machine word states = all (oneStepSuccess machine) transitionPairs where
+exhibitAccept:: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitAccept machine word states = all (oneStepAccept machine) transitionPairs where
     transitionPairs = zip word (consecutivePairs states)
-
 
 -- computes the outcome of a state machine 
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
@@ -93,7 +92,7 @@ accept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word
 
 
 -- we should have the following laws:
--- exhibit machine word states == accept machine word
+-- exhibitAccept machine word states == accept machine word
 -- exhibit (StateMachine transition initial acceptSet) word states == Set.Member (compute (StateMachine transition initial acceptSet) word) acceptSet
 -- TODO: add more laws here
 
@@ -108,11 +107,27 @@ data NDStateMachine states alphabet = NDStateMachine {
     ndAcceptStates :: Set.Set states
 }
 
-ndExhibitCompute :: NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-ndExhibitCompute = undefined
+-- verifies a single step of computation by a non-deterministic state machine
+ndOneStepCompute :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+ndOneStepCompute _ (_, (Nothing, Just _ )) = True
+ndOneStepCompute (NDStateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = Set.member s2 (t letter s1)
+ndOneStepCompute _ (_,  (Just _, Nothing)) = True
+ndOneStepCompute (NDStateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
-ndExhibitSuccess :: NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-ndExhibitSuccess = undefined
+-- verifies a single step of computation by a non-deterministic state machine
+ndOneStepAccept :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+ndOneStepAccept (NDStateMachine _t initial _acceptSet) (_, (Nothing, Just state )) = initial == state
+ndOneStepAccept (NDStateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = Set.member s2 (t letter s1)
+ndOneStepAccept (NDStateMachine _t _initial acceptSet)  (_,  (Just state, Nothing)) = Set.member state acceptSet
+ndOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
+
+ndExhibitCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+ndExhibitCompute machine word states = all (ndOneStepCompute machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
+
+ndExhibitAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+ndExhibitAccept machine word states = all (ndOneStepAccept machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
 
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndCompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
