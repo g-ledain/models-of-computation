@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Eta reduce" #-}
 import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Applicative
@@ -107,6 +109,10 @@ data NDStateMachine states alphabet = NDStateMachine {
     ndAcceptStates :: Set.Set states
 }
 
+-- makes input and output argument of non-deterministic transition function uniform
+ndFlatten :: (alphabet -> states -> Set.Set states) -> (alphabet -> Set.Set states -> Set.Set states)
+(ndFlatten f) letter = join . fmap (f letter) 
+
 -- verifies a single step of computation by a non-deterministic state machine
 ndOneStepCompute :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
 ndOneStepCompute _ (_, (Nothing, Just _ )) = True
@@ -130,30 +136,29 @@ ndExhibitAccept machine word states = all (ndOneStepAccept machine) transitionPa
     transitionPairs = zip word (consecutivePairs states)
 
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
-ndCompute (NDStateMachine t i _as)  = foldr flattenedTransition  (return i)  where
-    flattenedTransition bs = (t bs =<<)
+ndCompute (NDStateMachine t i _as)  = foldr (ndFlatten t) (return i)
 
 ndComputeUnfold :: NDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
-ndComputeUnfold = undefined
+ndComputeUnfold (NDStateMachine t i _a) word = runningFoldr (ndFlatten t)  (return i) word
 
-ndAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
-ndAccept (StateMachine t i a) word = Set.member (compute (StateMachine t i a) word) a
+ndAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Bool
+ndAccept (NDStateMachine t i a) word = Set.member (ndCompute (NDStateMachine t i a) word) (return a)
 
 -- turns non-deterministic state machine into equivalent state machine
 subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
-subsetConstruction (NDStateMachine t i as) = StateMachine flattenedTransition (return i) (return as) where
-    flattenedTransition bs = (t bs =<<)
+subsetConstruction (NDStateMachine t i as) = StateMachine (ndFlatten t)  (return i) (return as)
 
 -- inclusion of state machines into non-deterministic state machines
 ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
 ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
     expandedTransition b = return . t b
 
-data Augmented alphabet = Augmented alphabet | Epsilon
+-- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their function
+data Augmented alphabet = Simply alphabet | Epsilon
 
 -- variant of non-deterministic state machine with "null" paths
 -- note that this is not equivalent to a non-deterministic state machine over arbitrary types
--- because taking the epsilon-closure may not be computable 
+-- because foldr the epsilon-closure may not be computable 
 data EpsilonNDStateMachine states alphabet = EpsilonNDStateMachine {
     epsilonNdTransitionFunction :: Augmented alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
     episilonNdInitialState :: states,
@@ -178,23 +183,49 @@ stabilise function element = Set.fromList (stabiliseList (Set.toList . function)
 epsilonClosure :: (Ord states) => (Augmented alphabet -> states -> Set.Set states) -> states -> Set.Set states
 epsilonClosure transition = stabilise (transition Epsilon)
 
-epsilonNdExhibitCompute :: EpsilonNDStateMachine states alphabet -> [alphebet] -> [states] -> Bool
-epsilonNdExhibitCompute = undefined
+-- verifies a single step of computation by an epsilon-non-deterministic state machine
+epsilonNdOneStepCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+epsilonNdOneStepCompute _ (_, (Nothing, Just _ )) = True
+epsilonNdOneStepCompute (EpsilonNDStateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
+    regularTransition l = t (Simply l)
+    epsilonTransition = epsilonClosure t 
+epsilonNdOneStepCompute _ (_,  (Just _, Nothing)) = True
+epsilonNdOneStepCompute (EpsilonNDStateMachine _t _initial _acceptSet)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
-epsilonNdExhibitSuccess :: EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-epsilonNdExhibitSuccess = undefined
+-- verifies a single step of computation by an epsilon-non-deterministic state machine
+epsilonNdOneStepAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+epsilonNdOneStepAccept (EpsilonNDStateMachine _t initial _acceptSet) (_, (Nothing, Just state )) = initial == state
+epsilonNdOneStepAccept (EpsilonNDStateMachine t _initial _acceptSet) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
+    regularTransition l = t (Simply l)
+    epsilonTransition = epsilonClosure t 
+epsilonNdOneStepAccept (EpsilonNDStateMachine _t _initial acceptSet)  (_,  (Just state, Nothing)) = Set.member state acceptSet
+epsilonNdOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
-epsilonNdCompute :: EpsilonNDStateMachine states alphabet -> [alphabet] -> Set.Set states
-epsilonNdCompute = undefined
+epsilonNdExhibitCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+epsilonNdExhibitCompute machine word states = all (epsilonNdOneStepCompute machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
+
+epsilonNdExhibitSuccess :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+epsilonNdExhibitSuccess machine word states = all (epsilonNdOneStepAccept machine) transitionPairs where
+    transitionPairs = zip word (consecutivePairs states)
+
+-- the definition here is horrible because of the partial application needed to convert alphabet to Augmented alphabet
+-- maybe this can be cleaned up somehow
+epsilonNdCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Set.Set states
+epsilonNdCompute (EpsilonNDStateMachine t i _as) = augmentedFoldr flattenedTransition (return i) where
+    --flattenedTransition letter stateSet = join (fmap (epsilonClosure t) ((join . fmap (t  letter)) stateSet))
+    flattenedTransition letter stateSet = epsilonClosure t =<< t  letter =<< stateSet
+    augmentedFoldr f = foldr g where
+        g x = f (Simply x)
 
 epsilonNdComputeUnfold :: EpsilonNDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
-epsilonNdComputeUnfold = undefined
+epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldr (ndFlatten t)  (return i) (fmap Simply word)
 
-epsilonNdAccept :: EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
-epsilonNdAccept = undefined
+epsilonNdAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
+epsilonNdAccept (EpsilonNDStateMachine t i a) word = Set.member (epsilonNdCompute (EpsilonNDStateMachine t i a) word) (return a)
 
 squareAdd :: Int -> Int -> Int
 squareAdd x y = x*x + y
 
 main :: IO()
-main = print (runningFoldr squareAdd 0 [1, 2, 3, 4]) 
+main = print (runningFoldr squareAdd 0 [1, 2, 3, 4])
