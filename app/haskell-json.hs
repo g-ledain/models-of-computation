@@ -224,6 +224,16 @@ epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldr (ndFla
 epsilonNdAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
 epsilonNdAccept (EpsilonNDStateMachine t i a) word = Set.member (epsilonNdCompute (EpsilonNDStateMachine t i a) word) (return a)
 
+-- inclusion of nondeterministic state machines into epsilon-nondeterministic state machines
+epsilonNdInclusion :: NDStateMachine states alphabet -> EpsilonNDStateMachine states alphabet
+epsilonNdInclusion (NDStateMachine t i a) = EpsilonNDStateMachine expandedTransition i a where
+    expandedTransition (Simply letter) ss = t letter ss
+    expandedTransition Epsilon ss = return ss
+
+epsilonSubsetConstruction :: (Ord states) => EpsilonNDStateMachine states alphabet -> NDStateMachine states alphabet
+epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = NDStateMachine closedTransition i a where
+    closedTransition letter ss = epsilonClosure t =<< t (Simply letter) ss
+
 squareAdd :: Int -> Int -> Int
 squareAdd x y = x*x + y
 
