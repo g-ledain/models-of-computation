@@ -135,10 +135,6 @@ ndExhibitAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] 
 ndExhibitAccept machine word states = all (ndOneStepAccept machine) transitionPairs where
     transitionPairs = zip word (consecutivePairs states)
 
-
-
-
-
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndCompute (NDStateMachine t i _as)  = foldr (ndFlatten t) (return i)
 
@@ -234,9 +230,12 @@ epsilonNdInclusion (NDStateMachine t i a) = EpsilonNDStateMachine expandedTransi
     expandedTransition (Simply letter) ss = t letter ss
     expandedTransition Epsilon ss = return ss
 
-epsilonSubsetConstruction :: (Ord states) => EpsilonNDStateMachine states alphabet -> NDStateMachine states alphabet
-epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = NDStateMachine closedTransition i a where
-    closedTransition letter ss = epsilonClosure t =<< t (Simply letter) ss
+-- It would be nice to have a function EpsilonNDStateMachine -> NDStateMachine which composes with subsetConstruction to give this function
+-- however, I can't get the initial states right for such a function. I could modify the transition function to take the epsilon closure at both the start
+-- and the end, but that feels rather inefficient
+epsilonSubsetConstruction :: (Ord states) => EpsilonNDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
+epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = StateMachine closedTransition (epsilonClosure t i) a where
+    closedTransition letter ss = epsilonClosure t =<< ndFlatten t (Simply letter) ss
 
 squareAdd :: Int -> Int -> Int
 squareAdd x y = x*x + y
