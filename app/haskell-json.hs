@@ -22,6 +22,12 @@ splits :: [a] -> [([a],[a])]
 splits [] = [([],[])]
 splits (a:as) = ([], a:as) : fmap (\ (xs, ys) -> (a:xs,ys) ) (splits as)
 
+--finds all ways of splitting a string into consecutive substrings
+decompositions :: [a] -> [[[a]]]
+decompositions = undefined
+
+--"abcd" -> [("abcd"), ("abc","d"),("ab","cd"),("a","bcd"),("ab","c","d"),("a","bc","d"),("a","b","cd"),("a","b","c","d")]
+
 regularUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
 regularUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
 
@@ -29,7 +35,7 @@ regularConcatenation :: Alphabet letters -> Alphabet letters -> Alphabet letters
 regularConcatenation (Alphabet pred1) (Alphabet pred2) = Alphabet (any (\ (x,y) -> pred1 x && pred2 y) . splits )
 
 kleeneStar :: Alphabet letters -> Alphabet letters
-kleeneStar = undefined
+kleeneStar (Alphabet predicate) = Alphabet (any (all predicate) . decompositions )
 
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
