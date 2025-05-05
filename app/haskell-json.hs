@@ -2,14 +2,8 @@
 {-# HLINT ignore "Eta reduce" #-}
 import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
-import Control.Applicative
 import Control.Monad
 import Data.List
-
---Set.Monad doesn't export cartesianProduct, so we'll have to do it ourselves
---Definition taken from https://hackage.haskell.org/package/containers-0.8/docs/Data-Set.html#v:cartesianProduct
-cartesianProduct :: (Ord t, Ord s) => Set.Set t -> Set.Set s -> Set.Set (t,s)
-cartesianProduct xs ys = Set.fromList $ Control.Applicative.liftA2 (,) (Set.toList xs) (Set.toList ys)
 
 data Json = Null
     | JsonBool Bool
@@ -18,6 +12,24 @@ data Json = Null
     | JsonList [Json]
     | JsonDict (Map String Json)
     deriving (Show)
+
+
+--alphabets and regular operations
+newtype Alphabet letters = Alphabet ([letters] -> Bool)
+
+-- splits string at each index
+splits :: [a] -> [([a],[a])]
+splits [] = [([],[])]
+splits (a:as) = ([], a:as) : fmap (\ (xs, ys) -> (a:xs,ys) ) (splits as)
+
+regularUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
+regularUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
+
+regularConcatenation :: Alphabet letters -> Alphabet letters -> Alphabet letters
+regularConcatenation (Alphabet pred1) (Alphabet pred2) = Alphabet (any (\ (x,y) -> pred1 x && pred2 y) . splits )
+
+kleeneStar :: Alphabet letters -> Alphabet letters
+kleeneStar = undefined
 
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
@@ -111,7 +123,7 @@ data NDStateMachine states alphabet = NDStateMachine {
 
 -- makes input and output argument of non-deterministic transition function uniform
 ndFlatten :: (alphabet -> states -> Set.Set states) -> (alphabet -> Set.Set states -> Set.Set states)
-(ndFlatten f) letter = join . fmap (f letter) 
+(ndFlatten f) letter = join . fmap (f letter)
 
 -- verifies a single step of computation by a non-deterministic state machine
 ndOneStepCompute :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
@@ -124,7 +136,7 @@ ndOneStepCompute (NDStateMachine _t _initial _acceptFunc)  (_letter, (Nothing, N
 ndOneStepAccept :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
 ndOneStepAccept (NDStateMachine _t initial _acceptFunc) (_, (Nothing, Just state )) = initial == state
 ndOneStepAccept (NDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (t letter s1)
-ndOneStepAccept (NDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothing)) = acceptFunc state 
+ndOneStepAccept (NDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothing)) = acceptFunc state
 ndOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 ndExhibitCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
@@ -188,7 +200,7 @@ epsilonNdOneStepCompute :: (Ord states) => EpsilonNDStateMachine states alphabet
 epsilonNdOneStepCompute _ (_, (Nothing, Just _ )) = True
 epsilonNdOneStepCompute (EpsilonNDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
     regularTransition l = t (Simply l)
-    epsilonTransition = epsilonClosure t 
+    epsilonTransition = epsilonClosure t
 epsilonNdOneStepCompute _ (_,  (Just _, Nothing)) = True
 epsilonNdOneStepCompute (EpsilonNDStateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
@@ -197,7 +209,7 @@ epsilonNdOneStepAccept :: (Ord states) => EpsilonNDStateMachine states alphabet 
 epsilonNdOneStepAccept (EpsilonNDStateMachine _t initial _acceptFunc) (_, (Nothing, Just state )) = initial == state
 epsilonNdOneStepAccept (EpsilonNDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
     regularTransition l = t (Simply l)
-    epsilonTransition = epsilonClosure t 
+    epsilonTransition = epsilonClosure t
 epsilonNdOneStepAccept (EpsilonNDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothing)) = acceptFunc state
 epsilonNdOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
@@ -234,11 +246,8 @@ epsilonNdInclusion (NDStateMachine t i a) = EpsilonNDStateMachine expandedTransi
 -- however, I can't get the initial states right for such a function. I could modify the transition function to take the epsilon closure at both the start
 -- and the end, but that feels rather inefficient
 epsilonSubsetConstruction :: (Ord states) => EpsilonNDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
-epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = StateMachine closedTransition (epsilonClosure t i) a where
+epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = StateMachine closedTransition (epsilonClosure t i) (any a) where
     closedTransition letter ss = epsilonClosure t =<< ndFlatten t (Simply letter) ss
 
-squareAdd :: Int -> Int -> Int
-squareAdd x y = x*x + y
-
 main :: IO()
-main = print (runningFoldr squareAdd 0 [1, 2, 3, 4])
+main = print (splits "abcd")
