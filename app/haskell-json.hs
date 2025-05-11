@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Eta reduce" #-}
+--{-# LANGUAGE InstanceSigs #-}
 import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
-
 data Json = Null
     | JsonBool Bool
     | JsonString String
@@ -13,34 +13,10 @@ data Json = Null
     | JsonDict (Map String Json)
     deriving (Show)
 
-
---alphabets and regular operations
-newtype Alphabet letters = Alphabet ([letters] -> Bool)
-
--- splits string at each index
-splits :: [a] -> [([a],[a])]
-splits [] = [([],[])]
-splits (a:as) = ([], a:as) : fmap (\ (xs, ys) -> (a:xs,ys) ) (splits as)
-
---finds all ways of splitting a string into consecutive substrings
-decompositions :: [a] -> [[[a]]]
-decompositions = undefined
-
---"abcd" -> [("abcd"), ("abc","d"),("ab","cd"),("a","bcd"),("ab","c","d"),("a","bc","d"),("a","b","cd"),("a","b","c","d")]
-
-regularUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
-regularUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
-
-regularConcatenation :: Alphabet letters -> Alphabet letters -> Alphabet letters
-regularConcatenation (Alphabet pred1) (Alphabet pred2) = Alphabet (any (\ (x,y) -> pred1 x && pred2 y) . splits )
-
-kleeneStar :: Alphabet letters -> Alphabet letters
-kleeneStar (Alphabet predicate) = Alphabet (any (all predicate) . decompositions )
-
 --state machine parameterised by arbitrary types
 --reduces to the case of a finite automation when states and alphabet are both finite sets e.g. enums
 data StateMachine states alphabet = StateMachine {
-    transitionFunction :: alphabet -> states -> states,--easier to foldr when arguments in this order
+    transitionFunction :: alphabet -> states -> states,
     initialState :: states,
     isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite lists to perform the subset construction
 }
@@ -90,16 +66,17 @@ exhibitAccept machine word states = all (oneStepAccept machine) transitionPairs 
 
 -- computes the outcome of a state machine 
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
-compute (StateMachine transition initial _accept) word  = foldr transition initial word
+compute (StateMachine transition initial _accept) word  = foldl' (flip transition) initial word
 
--- performs a foldr and puts intermediate values into a list
+-- performs a foldl and puts intermediate values into a list
 -- general recursion code smell, but I couldn't figure out another way to write this
-runningFoldr :: (a -> b -> b) -> b -> [a] -> ([b],b)
-runningFoldr _trans start [] = ([], start)
-runningFoldr trans start (b:bs) = (trans b start: fst (runningFoldr trans (trans b start) bs), trans b start)
+-- I should also maybe consider making this strict
+runningFoldl :: (b -> a -> b) -> b -> [a] -> ([b],b)
+runningFoldl _trans start [] = ([], start)
+runningFoldl trans start (a:as) = (trans start a: fst (runningFoldl trans (trans start a) as), trans start a)
 
 computeUnfold :: StateMachine states alphabet -> [alphabet] -> ([states], states)
-computeUnfold (StateMachine t i _a) word = runningFoldr t i word
+computeUnfold (StateMachine t i _a) word = runningFoldl (flip t) i word
 
 -- law: snd . computeUnfold == compute
 
@@ -116,13 +93,9 @@ accept (StateMachine t i a) word = a (compute (StateMachine t i a) word)
 -- exhibit (StateMachine transition initial acceptFunc) word states == Set.Member (compute (StateMachine transition initial acceptFunc) word) acceptFunc
 -- TODO: add more laws here
 
-stateProduct :: (Ord states1, Ord states2) => StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
-stateProduct (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (\ (x,y) -> a1 x || a2 y) where
-    transition w (state1, state2) = (t1 w state1, t2 w state2)
-
 -- non-deterministic state machine
 data NDStateMachine states alphabet = NDStateMachine {
-    ndTransitionFunction :: alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
+    ndTransitionFunction :: alphabet -> states -> Set.Set states,
     ndInitialState :: states,
     ndIsAcceptState :: states -> Bool
 }
@@ -154,10 +127,10 @@ ndExhibitAccept machine word states = all (ndOneStepAccept machine) transitionPa
     transitionPairs = zip word (consecutivePairs states)
 
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
-ndCompute (NDStateMachine t i _as)  = foldr (ndFlatten t) (return i)
+ndCompute (NDStateMachine t i _as)  = foldl (flip (ndFlatten t)) (return i)
 
 ndComputeUnfold :: NDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
-ndComputeUnfold (NDStateMachine t i _a) word = runningFoldr (ndFlatten t)  (return i) word
+ndComputeUnfold (NDStateMachine t i _a) word = runningFoldl (flip (ndFlatten t))  (return i) word
 
 ndAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Bool
 ndAccept (NDStateMachine t i a) word = any a (ndCompute (NDStateMachine t i a) word)
@@ -176,9 +149,9 @@ data Augmented alphabet = Simply alphabet | Epsilon
 
 -- variant of non-deterministic state machine with "null" paths
 -- note that this is not equivalent to a non-deterministic state machine over arbitrary types
--- because foldr the epsilon-closure may not be computable 
+-- because the epsilon-closure may not be computable 
 data EpsilonNDStateMachine states alphabet = EpsilonNDStateMachine {
-    epsilonNdTransitionFunction :: Augmented alphabet -> states -> Set.Set states,--easier to foldr when arguments in this order
+    epsilonNdTransitionFunction :: Augmented alphabet -> states -> Set.Set states,
     episilonNdInitialState :: states,
     epsilonNdIsAcceptState :: states -> Bool
 }
@@ -230,14 +203,14 @@ epsilonNdExhibitSuccess machine word states = all (epsilonNdOneStepAccept machin
 -- the definition here is horrible because of the partial application needed to convert alphabet to Augmented alphabet
 -- maybe this can be cleaned up somehow
 epsilonNdCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Set.Set states
-epsilonNdCompute (EpsilonNDStateMachine t i _as) = augmentedFoldr flattenedTransition (return i) where
+epsilonNdCompute (EpsilonNDStateMachine t i _as) = augmentedFoldl (flip flattenedTransition) (return i) where
     --flattenedTransition letter stateSet = join (fmap (epsilonClosure t) ((join . fmap (t  letter)) stateSet))
     flattenedTransition letter stateSet = epsilonClosure t =<< t  letter =<< stateSet
-    augmentedFoldr f = foldr g where
+    augmentedFoldl f = foldl g where
         g x = f (Simply x)
 
 epsilonNdComputeUnfold :: EpsilonNDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
-epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldr (ndFlatten t)  (return i) (fmap Simply word)
+epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldl (flip (ndFlatten t))  (return i) (fmap Simply word)
 
 epsilonNdAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
 epsilonNdAccept (EpsilonNDStateMachine t i a) word = any a (epsilonNdCompute (EpsilonNDStateMachine t i a) word)
@@ -255,5 +228,142 @@ epsilonSubsetConstruction :: (Ord states) => EpsilonNDStateMachine states alphab
 epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = StateMachine closedTransition (epsilonClosure t i) (any a) where
     closedTransition letter ss = epsilonClosure t =<< ndFlatten t (Simply letter) ss
 
+
+--alphabets and regular operations
+newtype Alphabet letters = Alphabet ([letters] -> Bool)
+
+-- splits string at each index
+splits :: [a] -> [([a],[a])]
+splits [] = [([],[])]
+splits (a:as) = ([], a:as) : fmap (\ (xs, ys) -> (a:xs,ys) ) (splits as)
+
+nonEmptySplits :: [a] -> [([a],[a])]
+nonEmptySplits word = filter (\ (xs, ys) ->  not (null xs) && not (null ys)) (splits word)
+
+cartesianProduct :: [a] -> [b] -> [(a,b)]
+cartesianProduct xs ys = [(x,y) | x <- xs, y <- ys] 
+
+--finds all ways of splitting a string into consecutive substrings
+decompositions :: [a] -> [[[a]]]
+decompositions [] = [[]]
+decompositions [x] = [[[x]]] --needs to be specified manually else the recursion gives [[[x]], [[x]]] and that throws everything off
+decompositions (x:xs) = join [map (\ ys -> [x]:ys) (decompositions xs),map (appendToFirst x) (decompositions xs)] where
+    appendToFirst :: a -> [[a]] -> [[a]]
+    appendToFirst y [] = [[y]]
+    appendToFirst y (z:zs) = (y:z):zs
+
+alphabetUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
+alphabetUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
+
+alphabetConcatenation :: Alphabet letters -> Alphabet letters -> Alphabet letters
+alphabetConcatenation (Alphabet pred1) (Alphabet pred2) = Alphabet (any (\ (x,y) -> pred1 x && pred2 y) . splits )
+
+kleeneStar :: Alphabet letters -> Alphabet letters
+kleeneStar (Alphabet predicate) = Alphabet (any (all predicate) . decompositions )
+
+-- state machine which recognises the intersection of languages recognised by each state machine
+stateMachineIntersection :: StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
+stateMachineIntersection (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (\ (x,y) -> a1 x && a2 y) where
+    transition w (state1, state2) = (t1 w state1, t2 w state2)
+
+-- state machine which recognises the union of languages recognised by each state machine
+stateMachineUnion :: StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
+stateMachineUnion (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine transition (i1, i2) (\ (x,y) -> a1 x || a2 y) where
+    transition w (state1, state2) = (t1 w state1, t2 w state2)
+
+--analogous to a "based set" in mathematics
+--I would call it "Pointed", but seems there is already a typeclass with that name
+data Based t = Base () 
+    | Original t 
+    deriving (Show, Eq, Ord)
+
+instance Functor Based where
+    fmap _ (Base ()) = Base ()
+    fmap func (Original x) = Original (func x)
+
+
+epsilonNdStateMachineUnion :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Based (Either states1 states2)) alphabet 
+epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (EpsilonNDStateMachine trans2 init2 accept2) = EpsilonNDStateMachine trans initState isAccept where
+    initState = Base ()
+
+    isAccept (Base ()) = False
+    isAccept (Original (Left x)) = accept1 x
+    isAccept (Original (Right x)) = accept2 x
+
+    trans Epsilon (Base ()) = Set.union (fmap (Original . Left) (Set.singleton init1)) (fmap (Original . Right) (Set.singleton init2))
+    trans (Simply _letter) (Base ()) = fmap Base Set.empty -- use of Base here is arbitrary, could use Original . Left or Original . Right
+    trans letter (Original (Left state)) = fmap (Original. Left) (trans1 letter state)
+    trans letter (Original (Right state)) = fmap (Original . Right) (trans2 letter state)
+
+
+epsilonNdStateMachineConcatenation :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Either states1 states2) alphabet
+epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acceptLeft) (EpsilonNDStateMachine transRight initRight acceptRight)  = EpsilonNDStateMachine trans initial acceptstates where
+    initial = Left initLeft
+
+    acceptstates (Left _) = False
+    acceptstates (Right state) = acceptRight state
+
+    trans Epsilon (Left state) = if acceptLeft state then Set.union (fmap Left (transLeft Epsilon state)) (Set.singleton (Right initRight)) else undefined
+    trans (Simply letter) (Left state) = fmap Left (transLeft (Simply letter) state)
+    trans letter (Right state) = fmap Right (transRight letter state)
+    
+
+-- state machine which recognises the Kleene star of the language recognised by the original state machine
+stateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
+stateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
+    
+    isKleeneAccept (Base ()) = False
+    isKleeneAccept (Original x) = isAccept x
+
+    kleeneInitial = Base ()
+
+    kleeneTrans Epsilon (Base ()) = Set.singleton (Original initial)
+    kleeneTrans (Simply _letter) (Base ()) = Set.empty
+    kleeneTrans Epsilon (Original state) = if isAccept state then Set.union (Set.singleton (Original initial)) (fmap Original (trans Epsilon state)) else fmap Original (trans Epsilon state)
+    kleeneTrans (Simply letter) (Original state) = fmap Original (trans (Simply letter) state)
+
+{-
+data GoodStates = Start
+    | G 
+    | O1 
+    | O2 
+    | D
+    deriving (Show, Eq, Ord)
+-}
+
+data GoodStates = Start
+    | G 
+    | O1 
+    | O2 
+    | D
+    | Bin
+    deriving (Show, Eq, Ord)
+
+data TestAlphabet = GoodToBad
+    | BadToGood 
+    deriving (Show)
+
+
+testMachine :: EpsilonNDStateMachine GoodStates Char 
+testMachine = EpsilonNDStateMachine trans initial isAccept where
+    initial = Start
+    isAccept x = x == D 
+
+    trans (Simply 'g') Start = Set.singleton G
+    trans (Simply 'o') G  = Set.singleton O1
+    trans (Simply 'o') O1  = Set.singleton O2
+    trans (Simply 'd') O2  = Set.singleton D
+    trans _letter _state = Set.empty
+
+testMachine2 :: StateMachine GoodStates Char
+testMachine2 = StateMachine trans initial isAccept where
+    initial = Start
+    isAccept x = x == D
+    trans 'g' Start = G
+    trans 'o' G  = O1
+    trans 'o' O1  = O2
+    trans 'd' O2  = D
+    trans _letter _state = Bin
+
 main :: IO()
-main = print (splits "abcd")
+main = print (computeUnfold testMachine2 "good")
