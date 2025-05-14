@@ -5,6 +5,7 @@ import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
+import qualified Data.Bifunctor
 data Json = Null
     | JsonBool Bool
     | JsonString String
@@ -42,16 +43,29 @@ oneStepAccept (StateMachine _t _initial acceptFunc) (_letter,  (Just state, Noth
 oneStepAccept (StateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 -- verifies a single step of computation by a state machine
-oneStepCompute :: (Eq states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
+oneStepCompute :: (Eq states) => StateMachine states alphabet -> (Maybe alphabet, (Maybe states, Maybe states)) -> Bool
 oneStepCompute _ (_, (Nothing, Just _ )) = True
-oneStepCompute (StateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStepCompute (StateMachine t _initial _acceptFunc) (Just letter, (Just s1, Just s2)) = t letter s1 == s2
+oneStepCompute _ (Nothing, (Just _, Just _)) = False
 oneStepCompute _ (_,  (Just _, Nothing)) = True
 oneStepCompute (StateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
+--version of zip which preserves longer original length
+longZip :: [a] -> [b] -> [(Maybe a, Maybe b)]
+longZip [] bs = fmap (\ b -> (Nothing, Just b)) bs
+longZip as [] = fmap (\ a -> (Just a,Nothing)) as
+longZip (a:as) (b:bs) = (Just a, Just b) : longZip as bs
+
 -- Checks whether the given sequence of states exhibits the computation of the state machine on the given word
+-- Lots of screwing around with Maybe here, doesn't feel very clean
 exhibitCompute :: (Eq states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitCompute machine word states = all (oneStepCompute machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+exhibitCompute machine word states = exhibitComputeHelper machine (Nothing : fmap Just word) states
+
+exhibitComputeHelper :: (Eq states) => StateMachine states alphabet -> [Maybe alphabet] -> [states] -> Bool
+exhibitComputeHelper machine word states = all (oneStepCompute machine) transitionPairs where
+    transitionPairs = fmap (Data.Bifunctor.bimap join joinPair) (longZip word (consecutivePairs states)) where
+        joinPair Nothing = (Nothing, Nothing)
+        joinPair (Just pair) = pair
 
 -- Checks whether the given sequence of states exhibits the *succesful* computation of the state machine on the given word
 -- This is the "mathematical" definition of a state machine accepting a word, where the sequence of states required to exist
@@ -73,7 +87,8 @@ compute (StateMachine transition initial _accept) word  = foldl' (flip transitio
 -- I should also maybe consider making this strict
 runningFoldl :: (b -> a -> b) -> b -> [a] -> ([b],b)
 runningFoldl _trans start [] = ([], start)
-runningFoldl trans start (a:as) = (trans start a: fst (runningFoldl trans (trans start a) as), trans start a)
+runningFoldl trans start (a:as) = (trans start a: fst next, snd next) where
+    next = runningFoldl trans (trans start a) as
 
 computeUnfold :: StateMachine states alphabet -> [alphabet] -> ([states], states)
 computeUnfold (StateMachine t i _a) word = runningFoldl (flip t) i word
@@ -158,7 +173,7 @@ data EpsilonNDStateMachine states alphabet = EpsilonNDStateMachine {
 
 -- iterates a function until a fixed point is reached
 stabiliseFunc :: (Eq a) => (a -> a) -> a -> [a]
-stabiliseFunc f x = unfoldr (\ y -> if f y == y then Nothing else Just (f y, y)) x
+stabiliseFunc f x = x : unfoldr (\ y -> if f y == y then Nothing else Just (f y,f y)) x
 
 -- iterate and put values into list until output stabilises
 stabiliseList :: (Eq b) => (b -> [b]) -> b -> [b]
@@ -207,10 +222,10 @@ epsilonNdCompute (EpsilonNDStateMachine t i _as) = augmentedFoldl (flip flattene
     --flattenedTransition letter stateSet = join (fmap (epsilonClosure t) ((join . fmap (t  letter)) stateSet))
     flattenedTransition letter stateSet = epsilonClosure t =<< t  letter =<< stateSet
     augmentedFoldl f = foldl g where
-        g x = f (Simply x)
+        g y x = f y (Simply x)
 
 epsilonNdComputeUnfold :: EpsilonNDStateMachine states alphabet -> [alphabet] -> ([Set.Set states], Set.Set states)
-epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldl (flip (ndFlatten t))  (return i) (fmap Simply word)
+epsilonNdComputeUnfold (EpsilonNDStateMachine t i _a) word = runningFoldl (flip (ndFlatten t)) (return i) (fmap Simply word)
 
 epsilonNdAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Bool
 epsilonNdAccept (EpsilonNDStateMachine t i a) word = any a (epsilonNdCompute (EpsilonNDStateMachine t i a) word)
@@ -241,7 +256,7 @@ nonEmptySplits :: [a] -> [([a],[a])]
 nonEmptySplits word = filter (\ (xs, ys) ->  not (null xs) && not (null ys)) (splits word)
 
 cartesianProduct :: [a] -> [b] -> [(a,b)]
-cartesianProduct xs ys = [(x,y) | x <- xs, y <- ys] 
+cartesianProduct xs ys = [(x,y) | x <- xs, y <- ys]
 
 --finds all ways of splitting a string into consecutive substrings
 decompositions :: [a] -> [[[a]]]
@@ -273,8 +288,8 @@ stateMachineUnion (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine
 
 --analogous to a "based set" in mathematics
 --I would call it "Pointed", but seems there is already a typeclass with that name
-data Based t = Base () 
-    | Original t 
+data Based t = Base ()
+    | Original t
     deriving (Show, Eq, Ord)
 
 instance Functor Based where
@@ -282,7 +297,7 @@ instance Functor Based where
     fmap func (Original x) = Original (func x)
 
 
-epsilonNdStateMachineUnion :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Based (Either states1 states2)) alphabet 
+epsilonNdStateMachineUnion :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Based (Either states1 states2)) alphabet
 epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (EpsilonNDStateMachine trans2 init2 accept2) = EpsilonNDStateMachine trans initState isAccept where
     initState = Base ()
 
@@ -306,12 +321,12 @@ epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acc
     trans Epsilon (Left state) = if acceptLeft state then Set.union (fmap Left (transLeft Epsilon state)) (Set.singleton (Right initRight)) else undefined
     trans (Simply letter) (Left state) = fmap Left (transLeft (Simply letter) state)
     trans letter (Right state) = fmap Right (transRight letter state)
-    
+
 
 -- state machine which recognises the Kleene star of the language recognised by the original state machine
 stateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
 stateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
-    
+
     isKleeneAccept (Base ()) = False
     isKleeneAccept (Original x) = isAccept x
 
@@ -332,31 +347,43 @@ data GoodStates = Start
 -}
 
 data GoodStates = Start
-    | G 
-    | O1 
-    | O2 
+    | G
+    | O1
+    | O2
     | D
     | Bin
     deriving (Show, Eq, Ord)
 
 data TestAlphabet = GoodToBad
-    | BadToGood 
+    | BadToGood
     deriving (Show)
 
 
-testMachine :: EpsilonNDStateMachine GoodStates Char 
-testMachine = EpsilonNDStateMachine trans initial isAccept where
+testMachine1 :: EpsilonNDStateMachine GoodStates Char
+testMachine1 = EpsilonNDStateMachine trans initial isAccept where
     initial = Start
-    isAccept x = x == D 
+    isAccept x = x == D
 
+    trans Epsilon G = Set.singleton D
     trans (Simply 'g') Start = Set.singleton G
     trans (Simply 'o') G  = Set.singleton O1
     trans (Simply 'o') O1  = Set.singleton O2
     trans (Simply 'd') O2  = Set.singleton D
     trans _letter _state = Set.empty
 
-testMachine2 :: StateMachine GoodStates Char
-testMachine2 = StateMachine trans initial isAccept where
+testMachine2 :: NDStateMachine GoodStates Char
+testMachine2 = NDStateMachine trans initial isAccept where
+    initial = Start
+    isAccept x = x == D
+
+    trans 'g' Start = Set.singleton G
+    trans 'o' G  = Set.singleton O1
+    trans 'o' O1  = Set.singleton O2
+    trans 'd' O2  = Set.singleton D
+    trans _letter _state = Set.empty
+
+testMachine3 :: StateMachine GoodStates Char
+testMachine3 = StateMachine trans initial isAccept where
     initial = Start
     isAccept x = x == D
     trans 'g' Start = G
@@ -365,5 +392,13 @@ testMachine2 = StateMachine trans initial isAccept where
     trans 'd' O2  = D
     trans _letter _state = Bin
 
+testStabilise :: GoodStates -> GoodStates
+testStabilise G = O1
+testStabilise O1 = O2
+testStabilise O2 = D
+testStabilise D = D
+testStabilise Bin = Bin
+testStabilise Start = Start
+
 main :: IO()
-main = print (computeUnfold testMachine2 "good")
+main = print (exhibitCompute testMachine3 "go" [Start, G, O1])
