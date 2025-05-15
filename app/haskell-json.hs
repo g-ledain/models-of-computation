@@ -21,31 +21,19 @@ data StateMachine states alphabet = StateMachine {
     isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite lists to perform the subset construction
 }
 
-exhibitPathToFinalAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitPathToFinalAccept (StateMachine _trans _initial acceptFunc) [] [state] = acceptFunc state
-exhibitPathToFinalAccept machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitPathToFinalAccept machine letters (second:rest)
-exhibitPathToFinalAccept _ _ _ = False
-
-exhibitAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitAccept machine word states@(start:_rest) = start == initialState machine && exhibitPathToFinalAccept machine word states
-exhibitAccept _ _ _ = False
-
-shiftFront :: [a] -> [Maybe a]
-shiftFront xs = Nothing : fmap Just xs
-
-append :: a->[a]->[a]
-append x = foldr (:) [x]
-
-shiftEnd :: [a] -> [Maybe a]
-shiftEnd xs = append Nothing (fmap Just xs)
-
-consecutivePairs :: [a] -> [(Maybe a, Maybe a)]
-consecutivePairs xs = zip (shiftFront xs) (shiftEnd xs)
-
 exhibitCompute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitCompute _machine [] [_state] = True 
+exhibitCompute _machine [] [_state] = True
 exhibitCompute machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitCompute machine letters (second:rest)
 exhibitCompute _ _ _ = False
+
+exhibitComputeToAcceptState :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitComputeToAcceptState (StateMachine _trans _initial acceptFunc) [] [state] = acceptFunc state
+exhibitComputeToAcceptState machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitComputeToAcceptState machine letters (second:rest)
+exhibitComputeToAcceptState _ _ _ = False
+
+exhibitAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitAccept machine word states@(start:_rest) = start == initialState machine && exhibitComputeToAcceptState machine word states
+exhibitAccept _ _ _ = False
 
 -- computes the outcome of a state machine 
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
@@ -103,12 +91,20 @@ ndOneStepAccept (NDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothi
 ndOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 ndExhibitCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-ndExhibitCompute machine word states = all (ndOneStepCompute machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+ndExhibitCompute _machine [] [_state] = True
+ndExhibitCompute machine@(NDStateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = Set.member second (trans letter first)  && ndExhibitCompute machine letters (second:rest)
+ndExhibitCompute _ _ _ = False
+
+-- helper function for ndExhibitAccept
+-- determines whether the word exhibits the computation *and* whether the computation ends in an accept state
+ndExhibitComputeToAcceptState :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+ndExhibitComputeToAcceptState (NDStateMachine _trans _start isAccept) [] [state] = isAccept state
+ndExhibitComputeToAcceptState machine@(NDStateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = Set.member second (trans letter first)  && ndExhibitCompute machine letters (second:rest)
+ndExhibitComputeToAcceptState _ _ _ = False
 
 ndExhibitAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-ndExhibitAccept machine word states = all (ndOneStepAccept machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+ndExhibitAccept machine@(NDStateMachine _trans initial _isAccept) word states@(first:_rest) = initial == first && ndExhibitComputeToAcceptState machine word states
+ndExhibitAccept _ _ _ = False
 
 ndCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Set.Set states
 ndCompute (NDStateMachine t i _as)  = foldl (flip (ndFlatten t)) (return i)
@@ -177,12 +173,17 @@ epsilonNdOneStepAccept (EpsilonNDStateMachine _t _initial acceptFunc)  (_,  (Jus
 epsilonNdOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 epsilonNdExhibitCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-epsilonNdExhibitCompute machine word states = all (epsilonNdOneStepCompute machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+epsilonNdExhibitCompute machine@(EpsilonNDStateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = Set.member second (epsilonClosure trans =<< trans (Simply letter) first)  && epsilonNdExhibitCompute machine letters (second:rest)
+epsilonNdExhibitCompute _ _ _ = False
+
+epsilonNdExhibitComputeToAcceptState :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
+epsilonNdExhibitComputeToAcceptState (EpsilonNDStateMachine _trans _initial acceptFunc) [] [state] = acceptFunc state
+epsilonNdExhibitComputeToAcceptState machine@(EpsilonNDStateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = Set.member second (epsilonClosure trans =<< trans (Simply letter) first)  && epsilonNdExhibitCompute machine letters (second:rest)
+epsilonNdExhibitComputeToAcceptState _ _ _ = False
 
 epsilonNdExhibitSuccess :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
-epsilonNdExhibitSuccess machine word states = all (epsilonNdOneStepAccept machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+epsilonNdExhibitSuccess machine@(EpsilonNDStateMachine _trans initial _acceptFunc) word states@(first:_rest) = first == initial && epsilonNdExhibitComputeToAcceptState machine word states
+epsilonNdExhibitSuccess _ _ _ = False
 
 -- the definition here is horrible because of the partial application needed to convert alphabet to Augmented alphabet
 -- maybe this can be cleaned up somehow
@@ -231,10 +232,13 @@ cartesianProduct xs ys = [(x,y) | x <- xs, y <- ys]
 decompositions :: [a] -> [[[a]]]
 decompositions [] = [[]]
 decompositions [x] = [[[x]]] --needs to be specified manually else the recursion gives [[[x]], [[x]]] and that throws everything off
-decompositions (x:xs) = join [map (\ ys -> [x]:ys) (decompositions xs),map (appendToFirst x) (decompositions xs)] where
+decompositions (x:xs) = join [map (singletonAtFront x) lowerDecomps, map (appendToFirst x) lowerDecomps] where
+    lowerDecomps = decompositions xs
     appendToFirst :: a -> [[a]] -> [[a]]
     appendToFirst y [] = [[y]]
     appendToFirst y (z:zs) = (y:z):zs
+    singletonAtFront :: a -> [[a]] -> [[a]]
+    singletonAtFront y zs = [y]:zs
 
 alphabetUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
 alphabetUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
@@ -322,10 +326,6 @@ data GoodStates = Start
     | D
     | Bin
     deriving (Show, Eq, Ord)
-
-data TestAlphabet = GoodToBad
-    | BadToGood
-    deriving (Show)
 
 
 testMachine1 :: EpsilonNDStateMachine GoodStates Char
