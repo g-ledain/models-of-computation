@@ -5,7 +5,6 @@ import Data.Map (Map)
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
-import qualified Data.Bifunctor
 data Json = Null
     | JsonBool Bool
     | JsonString String
@@ -22,6 +21,15 @@ data StateMachine states alphabet = StateMachine {
     isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite lists to perform the subset construction
 }
 
+exhibitPathToFinalAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitPathToFinalAccept (StateMachine _trans _initial acceptFunc) [] [state] = acceptFunc state
+exhibitPathToFinalAccept machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitPathToFinalAccept machine letters (second:rest)
+exhibitPathToFinalAccept _ _ _ = False
+
+exhibitAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitAccept machine word states@(start:_rest) = start == initialState machine && exhibitPathToFinalAccept machine word states
+exhibitAccept _ _ _ = False
+
 shiftFront :: [a] -> [Maybe a]
 shiftFront xs = Nothing : fmap Just xs
 
@@ -34,49 +42,10 @@ shiftEnd xs = append Nothing (fmap Just xs)
 consecutivePairs :: [a] -> [(Maybe a, Maybe a)]
 consecutivePairs xs = zip (shiftFront xs) (shiftEnd xs)
 
--- verifies that a single step is accepted by a state machine
--- we use a tuple type here to avoid some awkward partial specialisation + currying later
-oneStepAccept :: (Ord states) => StateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-oneStepAccept (StateMachine _t  initial _acceptFunc) (_letter, (Nothing, Just state)) = state == initial
-oneStepAccept (StateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = t letter s1 == s2
-oneStepAccept (StateMachine _t _initial acceptFunc) (_letter,  (Just state, Nothing)) = acceptFunc state
-oneStepAccept (StateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
-
--- verifies a single step of computation by a state machine
-oneStepCompute :: (Eq states) => StateMachine states alphabet -> (Maybe alphabet, (Maybe states, Maybe states)) -> Bool
-oneStepCompute _ (_, (Nothing, Just _ )) = True
-oneStepCompute (StateMachine t _initial _acceptFunc) (Just letter, (Just s1, Just s2)) = t letter s1 == s2
-oneStepCompute _ (Nothing, (Just _, Just _)) = False
-oneStepCompute _ (_,  (Just _, Nothing)) = True
-oneStepCompute (StateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
-
---version of zip which preserves longer original length
-longZip :: [a] -> [b] -> [(Maybe a, Maybe b)]
-longZip [] bs = fmap (\ b -> (Nothing, Just b)) bs
-longZip as [] = fmap (\ a -> (Just a,Nothing)) as
-longZip (a:as) (b:bs) = (Just a, Just b) : longZip as bs
-
--- Checks whether the given sequence of states exhibits the computation of the state machine on the given word
--- Lots of screwing around with Maybe here, doesn't feel very clean
-exhibitCompute :: (Eq states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitCompute machine word states = exhibitComputeHelper machine (Nothing : fmap Just word) states
-
-exhibitComputeHelper :: (Eq states) => StateMachine states alphabet -> [Maybe alphabet] -> [states] -> Bool
-exhibitComputeHelper machine word states = all (oneStepCompute machine) transitionPairs where
-    transitionPairs = fmap (Data.Bifunctor.bimap join joinPair) (longZip word (consecutivePairs states)) where
-        joinPair Nothing = (Nothing, Nothing)
-        joinPair (Just pair) = pair
-
--- Checks whether the given sequence of states exhibits the *succesful* computation of the state machine on the given word
--- This is the "mathematical" definition of a state machine accepting a word, where the sequence of states required to exist
--- is supplied as an argument
--- (This is likely horribly inefficient - we have to check a condition at the *end* of the
--- input, so a singly linked list is probably not a good choice of data structure here
--- Notice that we traverse the entire list to compute consecutiePairs, traverse it again 
--- for the zip, and then again for the all)
-exhibitAccept:: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-exhibitAccept machine word states = all (oneStepAccept machine) transitionPairs where
-    transitionPairs = zip word (consecutivePairs states)
+exhibitCompute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+exhibitCompute _machine [] [_state] = True 
+exhibitCompute machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitCompute machine letters (second:rest)
+exhibitCompute _ _ _ = False
 
 -- computes the outcome of a state machine 
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
@@ -401,4 +370,4 @@ testStabilise Bin = Bin
 testStabilise Start = Start
 
 main :: IO()
-main = print (exhibitCompute testMachine3 "go" [Start, G, O1])
+main = print (exhibitAccept testMachine3 "good" [Start, G, O1, O2, D])
