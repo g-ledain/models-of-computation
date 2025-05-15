@@ -21,6 +21,14 @@ data StateMachine states alphabet = StateMachine {
     isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite lists to perform the subset construction
 }
 
+-- performs a foldl and puts intermediate values into a list
+-- consider trying to turn this into a fold (I couldn't figure out how)
+-- I should also maybe consider making this strict
+runningFoldl :: (b -> a -> b) -> b -> [a] -> ([b],b)
+runningFoldl _trans start [] = ([], start)
+runningFoldl trans start (a:as) = (trans start a: fst next, snd next) where
+    next = runningFoldl trans (trans start a) as
+
 exhibitCompute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
 exhibitCompute _machine [] [_state] = True
 exhibitCompute machine@(StateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = trans letter first == second && exhibitCompute machine letters (second:rest)
@@ -39,30 +47,18 @@ exhibitAccept _ _ _ = False
 compute :: (Ord states) => StateMachine states alphabet -> [alphabet] -> states
 compute (StateMachine transition initial _accept) word  = foldl' (flip transition) initial word
 
--- performs a foldl and puts intermediate values into a list
--- general recursion code smell, but I couldn't figure out another way to write this
--- I should also maybe consider making this strict
-runningFoldl :: (b -> a -> b) -> b -> [a] -> ([b],b)
-runningFoldl _trans start [] = ([], start)
-runningFoldl trans start (a:as) = (trans start a: fst next, snd next) where
-    next = runningFoldl trans (trans start a) as
-
 computeUnfold :: StateMachine states alphabet -> [alphabet] -> ([states], states)
 computeUnfold (StateMachine t i _a) word = runningFoldl (flip t) i word
-
--- law: snd . computeUnfold == compute
 
 -- Checks whether a state machine accepts a word
 accept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> Bool
 accept (StateMachine t i a) word = a (compute (StateMachine t i a) word)
 
--- it might be nice to have a version of compute and accept which provides the Boolean output and 
--- additionally "unfolds" the sequence of states into a list
-
 
 -- we should have the following laws:
 -- exhibitAccept machine word states == accept machine word
 -- exhibit (StateMachine transition initial acceptFunc) word states == Set.Member (compute (StateMachine transition initial acceptFunc) word) acceptFunc
+-- law: snd . computeUnfold == compute
 -- TODO: add more laws here
 
 -- non-deterministic state machine
@@ -74,21 +70,7 @@ data NDStateMachine states alphabet = NDStateMachine {
 
 -- makes input and output argument of non-deterministic transition function uniform
 ndFlatten :: (alphabet -> states -> Set.Set states) -> (alphabet -> Set.Set states -> Set.Set states)
-(ndFlatten f) letter = join . fmap (f letter)
-
--- verifies a single step of computation by a non-deterministic state machine
-ndOneStepCompute :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-ndOneStepCompute _ (_, (Nothing, Just _ )) = True
-ndOneStepCompute (NDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (t letter s1)
-ndOneStepCompute _ (_,  (Just _, Nothing)) = True
-ndOneStepCompute (NDStateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
-
--- verifies a single step of computation by a non-deterministic state machine
-ndOneStepAccept :: (Ord states) => NDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-ndOneStepAccept (NDStateMachine _t initial _acceptFunc) (_, (Nothing, Just state )) = initial == state
-ndOneStepAccept (NDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (t letter s1)
-ndOneStepAccept (NDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothing)) = acceptFunc state
-ndOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
+(ndFlatten f) letter = (f letter =<<)
 
 ndExhibitCompute :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
 ndExhibitCompute _machine [] [_state] = True
@@ -115,14 +97,14 @@ ndComputeUnfold (NDStateMachine t i _a) word = runningFoldl (flip (ndFlatten t))
 ndAccept :: (Ord states) => NDStateMachine states alphabet -> [alphabet] -> Bool
 ndAccept (NDStateMachine t i a) word = any a (ndCompute (NDStateMachine t i a) word)
 
--- turns non-deterministic state machine into equivalent state machine
-subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
-subsetConstruction (NDStateMachine t i acceptFunc) = StateMachine (ndFlatten t)  (return i) (any acceptFunc)
-
 -- inclusion of state machines into non-deterministic state machines
 ndInclusion :: StateMachine states alphabet -> NDStateMachine states alphabet
 ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
     expandedTransition b = return . t b
+
+-- turns non-deterministic state machine into equivalent state machine
+subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
+subsetConstruction (NDStateMachine t i acceptFunc) = StateMachine (ndFlatten t)  (return i) (any acceptFunc)
 
 -- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their function
 data Augmented alphabet = Simply alphabet | Epsilon
@@ -153,24 +135,6 @@ stabilise function element = Set.fromList (stabiliseList (Set.toList . function)
 -- takes the epsilon closure of a state under the given transition function
 epsilonClosure :: (Ord states) => (Augmented alphabet -> states -> Set.Set states) -> states -> Set.Set states
 epsilonClosure transition = stabilise (transition Epsilon)
-
--- verifies a single step of computation by an epsilon-non-deterministic state machine
-epsilonNdOneStepCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-epsilonNdOneStepCompute _ (_, (Nothing, Just _ )) = True
-epsilonNdOneStepCompute (EpsilonNDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
-    regularTransition l = t (Simply l)
-    epsilonTransition = epsilonClosure t
-epsilonNdOneStepCompute _ (_,  (Just _, Nothing)) = True
-epsilonNdOneStepCompute (EpsilonNDStateMachine _t _initial _acceptFunc)  (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
-
--- verifies a single step of computation by an epsilon-non-deterministic state machine
-epsilonNdOneStepAccept :: (Ord states) => EpsilonNDStateMachine states alphabet -> (alphabet, (Maybe states, Maybe states)) -> Bool
-epsilonNdOneStepAccept (EpsilonNDStateMachine _t initial _acceptFunc) (_, (Nothing, Just state )) = initial == state
-epsilonNdOneStepAccept (EpsilonNDStateMachine t _initial _acceptFunc) (letter, (Just s1, Just s2)) = Set.member s2 (epsilonTransition =<< regularTransition letter s1) where
-    regularTransition l = t (Simply l)
-    epsilonTransition = epsilonClosure t
-epsilonNdOneStepAccept (EpsilonNDStateMachine _t _initial acceptFunc)  (_,  (Just state, Nothing)) = acceptFunc state
-epsilonNdOneStepAccept _machine (_letter, (Nothing, Nothing)) = False--should never happen in our use of this function
 
 epsilonNdExhibitCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> [states] -> Bool
 epsilonNdExhibitCompute machine@(EpsilonNDStateMachine trans _initial _acceptFunc) (letter:letters) (first:second:rest) = Set.member second (epsilonClosure trans =<< trans (Simply letter) first)  && epsilonNdExhibitCompute machine letters (second:rest)
@@ -297,8 +261,8 @@ epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acc
 
 
 -- state machine which recognises the Kleene star of the language recognised by the original state machine
-stateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
-stateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
+epsilonNdstateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
+epsilonNdstateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
 
     isKleeneAccept (Base ()) = False
     isKleeneAccept (Original x) = isAccept x
