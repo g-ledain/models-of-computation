@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# HLINT ignore "Eta reduce" #-}
 --{-# LANGUAGE InstanceSigs #-}
 import Data.Map (Map)
@@ -107,7 +108,7 @@ subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set st
 subsetConstruction (NDStateMachine t i acceptFunc) = StateMachine (ndFlatten t)  (return i) (any acceptFunc)
 
 -- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their function
-data Augmented alphabet = Simply alphabet | Epsilon
+data Augmented alphabet = Simply alphabet | Epsilon deriving (Eq, Ord, Show)
 
 -- variant of non-deterministic state machine with "null" paths
 -- note that this is not equivalent to a non-deterministic state machine over arbitrary types
@@ -179,7 +180,7 @@ epsilonSubsetConstruction (EpsilonNDStateMachine t i a) = StateMachine closedTra
 
 
 --alphabets and regular operations
-newtype Alphabet letters = Alphabet ([letters] -> Bool)
+newtype Language letters = Language ([letters] -> Bool)
 
 -- splits string at each index
 splits :: [a] -> [([a],[a])]
@@ -196,22 +197,22 @@ cartesianProduct xs ys = [(x,y) | x <- xs, y <- ys]
 decompositions :: [a] -> [[[a]]]
 decompositions [] = [[]]
 decompositions [x] = [[[x]]] --needs to be specified manually else the recursion gives [[[x]], [[x]]] and that throws everything off
-decompositions (x:xs) = join [map (singletonAtFront x) lowerDecomps, map (appendToFirst x) lowerDecomps] where
-    lowerDecomps = decompositions xs
+decompositions (x:xs) = join [map (singletonAtFront x) tailDecomps, map (appendToFirst x) tailDecomps] where
+    tailDecomps = decompositions xs
     appendToFirst :: a -> [[a]] -> [[a]]
     appendToFirst y [] = [[y]]
     appendToFirst y (z:zs) = (y:z):zs
     singletonAtFront :: a -> [[a]] -> [[a]]
     singletonAtFront y zs = [y]:zs
 
-alphabetUnion :: Alphabet letters -> Alphabet letters -> Alphabet letters
-alphabetUnion (Alphabet predicate1) (Alphabet predicate2) = Alphabet (\ x -> predicate1 x || predicate2 x)
+languageUnion :: Language letters -> Language letters -> Language letters
+languageUnion (Language predicate1) (Language predicate2) = Language (\ x -> predicate1 x || predicate2 x)
 
-alphabetConcatenation :: Alphabet letters -> Alphabet letters -> Alphabet letters
-alphabetConcatenation (Alphabet pred1) (Alphabet pred2) = Alphabet (any (\ (x,y) -> pred1 x && pred2 y) . splits )
+languageConcatenation :: Language letters -> Language letters -> Language letters
+languageConcatenation (Language pred1) (Language pred2) = Language (any (\ (x,y) -> pred1 x && pred2 y) . splits )
 
-kleeneStar :: Alphabet letters -> Alphabet letters
-kleeneStar (Alphabet predicate) = Alphabet (any (all predicate) . decompositions )
+kleeneStar :: Language letters -> Language letters
+kleeneStar (Language predicate) = Language (any (all predicate) . decompositions )
 
 -- state machine which recognises the intersection of languages recognised by each state machine
 stateMachineIntersection :: StateMachine states1 alphabet -> StateMachine states2 alphabet -> StateMachine (states1, states2) alphabet
@@ -233,6 +234,24 @@ instance Functor Based where
     fmap _ (Base ()) = Base ()
     fmap func (Original x) = Original (func x)
 
+
+data Regex alphabet = Empty 
+    | FromAlphabet (Augmented alphabet)
+    | Union (Regex alphabet) (Regex alphabet)
+    | Concatenation (Regex alphabet) (Regex alphabet)
+    | KleeneStar (Regex alphabet)
+    deriving (Eq, Ord, Show)
+
+-- rather defeats the point of constructing state machines, but useful to test that the
+-- two approaches are equivalent, and the pattern-matching makes it too nice not to
+-- implement it this way
+languageFromRegex :: (Eq alphabet) => Regex alphabet -> Language alphabet
+languageFromRegex Empty = Language (const False)
+languageFromRegex (FromAlphabet Epsilon) = Language (== [])
+languageFromRegex (FromAlphabet (Simply letter)) = Language (==[letter])
+languageFromRegex (Union regex1 regex2) = languageUnion (languageFromRegex regex1) (languageFromRegex regex2)
+languageFromRegex (Concatenation regex1 regex2) = languageConcatenation (languageFromRegex regex1) (languageFromRegex regex2)
+languageFromRegex (KleeneStar regex) = kleeneStar (languageFromRegex regex)
 
 epsilonNdStateMachineUnion :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Based (Either states1 states2)) alphabet
 epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (EpsilonNDStateMachine trans2 init2 accept2) = EpsilonNDStateMachine trans initState isAccept where
@@ -260,6 +279,8 @@ epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acc
     trans letter (Right state) = fmap Right (transRight letter state)
 
 
+data AnyType = forall a. Any a
+
 -- state machine which recognises the Kleene star of the language recognised by the original state machine
 epsilonNdstateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
 epsilonNdstateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
@@ -274,14 +295,17 @@ epsilonNdstateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) =
     kleeneTrans Epsilon (Original state) = if isAccept state then Set.union (Set.singleton (Original initial)) (fmap Original (trans Epsilon state)) else fmap Original (trans Epsilon state)
     kleeneTrans (Simply letter) (Original state) = fmap Original (trans (Simply letter) state)
 
-{-
-data GoodStates = Start
-    | G 
-    | O1 
-    | O2 
-    | D
-    deriving (Show, Eq, Ord)
--}
+
+stateMachineFromRegex :: Regex alphabet ->  EpsilonNDStateMachine AnyType alphabet
+stateMachineFromRegex Empty = EpsilonNDStateMachine trans initial isAccept where 
+    initial = Any ()
+    isAccept = const False
+    trans :: Augmented alphabet -> AnyType -> Set.Set AnyType
+    trans letter  (Any ()) = Set.singleton (Any ())
+    --trans = undefined
+
+stateMachineFromRegex _ = undefined
+
 
 data GoodStates = Start
     | G
@@ -324,14 +348,6 @@ testMachine3 = StateMachine trans initial isAccept where
     trans 'o' O1  = O2
     trans 'd' O2  = D
     trans _letter _state = Bin
-
-testStabilise :: GoodStates -> GoodStates
-testStabilise G = O1
-testStabilise O1 = O2
-testStabilise O2 = D
-testStabilise D = D
-testStabilise Bin = Bin
-testStabilise Start = Start
 
 main :: IO()
 main = print (exhibitAccept testMachine3 "good" [Start, G, O1, O2, D])
