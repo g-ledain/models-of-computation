@@ -157,8 +157,32 @@ We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $w':=w_0w_1\ldot
   \end{enumerate}
 \end{definition}
 
+We can give a more compact definition of an $\varepsilon$-non-deterministic state machine accepting a word using the notion of the $\epsilon$-closure of a set.
+
+\begin{definition}
+  Let $Q,\Sigma$ be sets and 
+  \[\delta: Q\times\Sigma_{\varepsilon} \to \mathcal{P}(Q) \]
+  be a function. 
+  Let $S \subseteq Q$. 
+  Then the $\varepsilon$-closure of $S$ is the set
+  \[\overline{S} := \{q \in Q: \exists q_1,\ldots,q_n \in S, q=q_1 \wedge \forall 1 \leq i < n, q_{i+1} \in \delta(q_i,\varepsilon) \}\]
+\end{definition}
+
+
 \begin{definition}[Accept]
-  \label{def:epsilon-nondeterministic-finite-automaton-accept}
+  \label{def:epsilon-nondeterministic-finite-automaton-accept-aug-closure}
+  Let $M:=(Q,\Sigma,\delta,q_0,F)$ be an $\varepsilon$-nondeterministic finite automaton.
+  We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $r_0,r_1,\ldots,r_n \in Q$ such that
+    \begin{enumerate}
+      \item $r_0=q_0$
+      \item $r_{i+1} \in \overline{\delta(r_i, w_{i+1})}$ for all $i = 0,1,\ldots, n-1$
+      \item $r_n\in F$
+    \end{enumerate}
+\end{definition}
+
+
+\begin{definition}[Accept]
+  \label{def:epsilon-nondeterministic-finite-automaton-accept-closure}
   Let $M:=(Q,\Sigma,\delta,q_0,F)$ be an $\varepsilon$-nondeterministic finite automaton.
   We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $w:=w_1w_2\ldots w_n \in\Sigma^*$, $k_1, k_2, \ldots, k_n \in \mathbb{N}$ and $r_0,\ldots,r_n\in Q$ such that
     \begin{enumerate}
@@ -173,9 +197,58 @@ We say that $M$ accepts a word $w \in \Sigma^*$ if there exists $w':=w_0w_1\ldot
 \end{definition}
 
 \begin{remark}
-  The definitions \ref{def:epsilon-nondeterministic-finite-automaton-accept} and \ref{def:epsilon-nondeterministic-finite-automaton-accept-aug} are equivalent by thinking about them for a second or two.
-  However \ref{def:epsilon-nondeterministic-finite-automaton-accept} is more suited to implementation in a programming language.
+  The definitions \ref{def:epsilon-nondeterministic-finite-automaton-accept-aug} and \ref{def:epsilon-nondeterministic-finite-automaton-accept-closure} are equivalent by thinking about them for a second or two.
+  However \ref{def:epsilon-nondeterministic-finite-automaton-accept-closure} is more suited to implementation in a programming language.
 \end{remark}
+
+There is an obvious way in which a finite automaton can be regarded as a non-deterministic finite automaton and in which a non-deterministic finite automaton can be regarded as a $\varepsilon$-non-deterministic finite automaton. 
+Moreover, these interpretations leave unchanged the language that the automaton recognises.
+More surprisingly, from a ($\varepsilon$)-non-deterministic automaton we can also construct a finite automaton which recognises the same language.
+Thus, all three models of computation have the same expressive power.
+
+\begin{definition}[Subset construction]
+\label{def:subset-construction}
+  Let $(Q,\Sigma,\delta,q_0,F)$ be a non-deterministic finite automaton. 
+  We construct a finite automaton $(\mathcal{P}(Q), \Sigma, \delta', \{q_0\}, F')$ where
+  \begin{itemize}
+    \item $F' := \{S\in \mathcal{P}(Q): S\cap F \neq \emptyset\}$
+    \item $\delta'(S, l) = \bigcup \{\delta(s,l): s\in S\}$
+  \end{itemize}
+\end{definition}
+
+\begin{theorem}
+\label{thm:subset-construction}
+The subset construction leaves unchanged the language recognised by the automaton.
+\end{theorem}
+
+\begin{proof}(Of \ref{thm:subset-construction})
+  Exercise.
+\end{proof}
+
+It would be nice if the equivalence $\textrm{finite automata} \leftrightarrow \varepsilon-\textrm{non-deterministic finite automata}$ factored as $\textrm{finite automata} \leftrightarrow \textrm{non-deterministic finite automata} \leftrightarrow \varepsilon-\textrm{non-deterministic finite automata}$.
+This may well be doable (either on the present definitions or by modifying the definition of $\varepsilon$-non-deterministic finite automata to take the $\varepsilon$-closure \textit{before} the transition function) but we will go the simpler route of a direct construction $\varepsilon-\textrm{non-deterministic finite automata} \to \textrm{finite automata}$.
+
+\begin{definition}[Subset construction]
+\label{def:ep-subset-construction}
+  Let $(Q,\Sigma,\delta,q_0,F)$ be an $\varepsilon$-non-deterministic finite automaton. 
+  We construct a finite automaton $(\mathcal{P}(Q), \Sigma, \delta', \overline{\{q_0\}}, F')$ where
+  \begin{itemize}
+    \item $F' := \{S\in \mathcal{P}(Q): S\cap F \neq \emptyset\}$
+    \item $\delta'(S, l) = \bigcup \{\overline{\delta(s,l)}: s\in S\}$
+  \end{itemize}
+\end{definition}
+
+\begin{theorem}
+\label{thm:ep-subset-construction}
+The subset construction leaves unchanged the language recognised by the automaton.
+\end{theorem}
+
+\begin{proof}(Of \ref{thm:ep-subset-construction})
+  Exercise.
+\end{proof}
+
+
+\subsection{Regular Languages}
 
 \begin{definition}[Regular operations]
 \label{def:regular-operation}
@@ -184,7 +257,7 @@ We define three \textbf{regular operations} on languages:
 \begin{enumerate}
   \item Union: $A \cup B$
   \item Concatenation: $A \circ B := \{ab: a\in A, b\in B\}$
-  \item Kleene star: $A^* :=\{x_ax_2\ldots x_n \text{ where } x_1,x_2,\ldots,x_n\in A\}$
+  \item Kleene star: $A^* :=\{x_1x_2\ldots x_n \text{ where } x_1,x_2,\ldots,x_n\in A\}$
 \end{enumerate}
 \end{definition}
 
@@ -193,13 +266,38 @@ We define three \textbf{regular operations} on languages:
 Note that the definition of the Kleene star on a language above is compatible with its use to denote the set of words over some alphabet.
 \end{note}
 
+We want to prove that applying the regular languages are closed under the regular operations.
+In light of the equivalence of the three kinds of automata, it is enough to construct just an $\varepsilon$-non-deterministic finite automaton which recognises the union/concatenation/Kleene star of the languages.
+
+For fun, let's consider intersection before any of the three regular operations:
+\begin{proposition}[Intersections of regular languages are regular]
+  \label{prop:intersection-of-regular-languages-regular}
+    Let $A$, $B$ be regular languages over the same alphabet $\Sigma$. 
+    Then $A\cap B$ is also regular.
+  \end{proposition}
+  
+  \begin{proof}
+  \label{prf:intersection-of-regular-languages-regular}
+    Since $A$, $B$ are regular, they are recognised by finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
+    Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
+    \begin{itemize}
+      \item $Q^3 := Q^1 \times Q^2$
+      \item $\delta^3((s^1, s^2), a) = (\delta^1(s^1,a). \delta^2(s^2, a))$
+      \item $q^3_0 = (q^1_0, q^2_0)$
+      \item $F^3 := F^1\times F^2$
+    \end{itemize}
+    Then $M_3$ recognises $A\cap B$.
+  \end{proof}
+
+For closure under union, we can actually construct a deterministic finite automaton.
+
 \begin{proposition}[Unions of regular languages are regular]
 \label{prop:union-of-regular-languages-regular}
 Let $A$, $B$ be regular languages over the same alphabet $\Sigma$. 
 Then $A\cup B$ is also regular.
 \end{proposition}
 
-\begin{proof}
+\begin{proof}(Of \ref{prop:union-of-regular-languages-regular})
 \label{prf:union-of-regular-languages-regular}
 Since $A$, $B$ are regular, they are recognised by finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
 Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
@@ -212,23 +310,26 @@ Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
 Then $M_3$ recognises $A\cup B$.
 \end{proof}
 
-\begin{proposition}[Intersections of regular languages are regular]
-\label{prop:intersection-of-regular-languages-regular}
-  Let $A$, $B$ be regular languages over the same alphabet $\Sigma$. 
-  Then $A\cap B$ is also regular.
-\end{proposition}
+We can also construct an $\varepsilon$-non-determinstic automaton using a slightly different technique.
 
-\begin{proof}
-\label{prf:intersection-of-regular-languages-regular}
-  Since $A$, $B$ are regular, they are recognised by finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
-  Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
-  \begin{itemize}
-    \item $Q^3 := Q^1 \times Q^2$
-    \item $\delta^3((s^1, s^2), a) = (\delta^1(s^1,a). \delta^2(s^2, a))$
-    \item $q^3_0 = (q^1_0, q^2_0)$
-    \item $F^3 := F^1\times F^2$
-  \end{itemize}
-  Then $M_3$ recognises $A\cap B$.
+\begin{proof}(Of \ref{prop:union-of-regular-languages-regular})
+\label{prf:union-of-regular-languages-regular-ep}
+Since $A$, $B$ are regular, they are recognised by $\varepsilon$-non-deterministic finite automata $M^1:=(Q^1,\Sigma,\delta^1,q^1_0,F^1)$ and $M^2:=(Q^2,\Sigma,\delta^2,q^2_0,F^2)$.
+Define $M^3:=(Q^3,\Sigma,\delta^3,q^3_0,F^3)$ where:
+\begin{itemize}
+  \item $Q^3 := Q^1 \coprod Q^2 \coprod \{\ast\}$
+  \item $\delta^3(q,l) = \begin{cases}
+  \{q^1_0, q^2_0\} & \text{if } q=\ast \text{ and } l = \varepsilon \\
+  \delta^1(q,l) & \text{if } q\in Q^1 \\
+  \delta^2(q,l) & \text{if } q\in Q^2 \\
+  \emptyset & \text{otherwise} 
+\end{cases}$
+  \item $q^3_0 = \ast$
+  \item $F^3 := F^1 \coprod F^2$
+\end{itemize}
+Then $M_3$ recognises $A\cup B$.
 \end{proof}
+
+The other two operations are harder to construct deterministic automata for, so we instead construct $\varepsilon$-non-deterministic automata for recognising them.
 
 \end{document}

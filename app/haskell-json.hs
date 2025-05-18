@@ -301,7 +301,6 @@ epsilonNdStateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) =
 epsilonNdStateMachineKleeneStarWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
 epsilonNdStateMachineKleeneStarWrapper (EraseStates machine) = EraseStates (epsilonNdStateMachineKleeneStar machine)
 
-
 -- the return type of statemachineFromRegex should be parameterised by the input value
 -- this is because different regexes require different state types
 -- however, Haskell cannot achieve this because it does not have dependent types
@@ -375,5 +374,12 @@ testMachine3 = StateMachine trans initial isAccept where
     trans 'd' O2  = D
     trans _letter _state = Bin
 
+testMachine4 :: EpsilonNDStateMachine Bool Char
+testMachine4 = EpsilonNDStateMachine trans initial isAccept where 
+    initial = False
+    isAccept = (== True)
+    trans letter False = if letter == Simply 'k' then Set.singleton True else Set.empty
+    trans _letter True = Set.empty
+
 main :: IO()
-main = print (exhibitAccept testMachine3 "good" [Start, G, O1, O2, D])
+main = print (epsilonNdAccept testMachine4 "k")
