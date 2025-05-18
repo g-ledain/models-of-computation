@@ -266,6 +266,9 @@ epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (Epsilon
     trans letter (Original (Left state)) = fmap (Original. Left) (trans1 letter state)
     trans letter (Original (Right state)) = fmap (Original . Right) (trans2 letter state)
 
+epsilonNdStateMachineUnionWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
+epsilonNdStateMachineUnionWrapper (EraseStates machine1) (EraseStates machine2) = EraseStates (epsilonNdStateMachineUnion machine1 machine2)
+
 
 epsilonNdStateMachineConcatenation :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Either states1 states2) alphabet
 epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acceptLeft) (EpsilonNDStateMachine transRight initRight acceptRight)  = EpsilonNDStateMachine trans initial acceptstates where
@@ -278,12 +281,12 @@ epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acc
     trans (Simply letter) (Left state) = fmap Left (transLeft (Simply letter) state)
     trans letter (Right state) = fmap Right (transRight letter state)
 
-
-data AnyType = forall a. Any a
+epsilonNdStateMachineConcatenationWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
+epsilonNdStateMachineConcatenationWrapper (EraseStates machine1) (EraseStates machine2) = EraseStates (epsilonNdStateMachineConcatenation machine1 machine2)
 
 -- state machine which recognises the Kleene star of the language recognised by the original state machine
-epsilonNdstateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
-epsilonNdstateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
+epsilonNdStateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
+epsilonNdStateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
 
     isKleeneAccept (Base ()) = False
     isKleeneAccept (Original x) = isAccept x
@@ -295,16 +298,39 @@ epsilonNdstateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) =
     kleeneTrans Epsilon (Original state) = if isAccept state then Set.union (Set.singleton (Original initial)) (fmap Original (trans Epsilon state)) else fmap Original (trans Epsilon state)
     kleeneTrans (Simply letter) (Original state) = fmap Original (trans (Simply letter) state)
 
+epsilonNdStateMachineKleeneStarWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
+epsilonNdStateMachineKleeneStarWrapper (EraseStates machine) = EraseStates (epsilonNdStateMachineKleeneStar machine)
 
-stateMachineFromRegex :: Regex alphabet ->  EpsilonNDStateMachine AnyType alphabet
-stateMachineFromRegex Empty = EpsilonNDStateMachine trans initial isAccept where 
-    initial = Any ()
+
+-- the return type of statemachineFromRegex should be parameterised by the input value
+-- this is because different regexes require different state types
+-- however, Haskell cannot achieve this because it does not have dependent types
+-- Instead, we fudge things with existential types - we know that *some* state type with the right constraints exists
+-- and that's good enough
+data AgnosticStateMachine alphabet = forall states. (Ord states) => EraseStates (EpsilonNDStateMachine states alphabet)
+
+stateMachineFromRegex :: (Eq alphabet) => Regex alphabet ->  AgnosticStateMachine alphabet
+stateMachineFromRegex Empty = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+    initial = ()
     isAccept = const False
-    trans :: Augmented alphabet -> AnyType -> Set.Set AnyType
-    trans letter  (Any ()) = Set.singleton (Any ())
-    --trans = undefined
+    trans _letter  () = Set.singleton ()
 
-stateMachineFromRegex _ = undefined
+stateMachineFromRegex (FromAlphabet Epsilon) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+    initial = True
+    isAccept = (== True)
+    trans _letter True = Set.singleton False
+    trans _letter False = Set.singleton False
+
+stateMachineFromRegex (FromAlphabet (Simply targetLetter)) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+    initial = False
+    isAccept = (== True)
+    trans letter False = if letter == Simply targetLetter then Set.singleton True else Set.empty
+    trans _letter True = Set.empty
+    
+
+stateMachineFromRegex (Union regex1 regex2) = epsilonNdStateMachineUnionWrapper (stateMachineFromRegex regex1) (stateMachineFromRegex regex2)
+stateMachineFromRegex (Concatenation regex1 regex2) = epsilonNdStateMachineConcatenationWrapper (stateMachineFromRegex regex1) (stateMachineFromRegex regex2)
+stateMachineFromRegex (KleeneStar regex) = epsilonNdStateMachineKleeneStarWrapper (stateMachineFromRegex regex) 
 
 
 data GoodStates = Start
