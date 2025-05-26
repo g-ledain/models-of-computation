@@ -2,16 +2,17 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# HLINT ignore "Eta reduce" #-}
 --{-# LANGUAGE InstanceSigs #-}
-import Data.Map (Map)
+import qualified Data.Map as Map
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
+import Data.Maybe (fromMaybe)
 data Json = Null
     | JsonBool Bool
     | JsonString String
     | JsonFloat Float
     | JsonList [Json]
-    | JsonDict (Map String Json)
+    | JsonDict (Map.Map String Json)
     deriving (Show)
 
 --state machine parameterised by arbitrary types
@@ -226,16 +227,18 @@ stateMachineUnion (StateMachine t1 i1 a1) (StateMachine t2 i2 a2) = StateMachine
 
 --analogous to a "based set" in mathematics
 --I would call it "Pointed", but seems there is already a typeclass with that name
-data Based t = Base ()
+data Based t = Base
     | Original t
     deriving (Show, Eq, Ord)
 
 instance Functor Based where
-    fmap _ (Base ()) = Base ()
+    fmap _ Base = Base
     fmap func (Original x) = Original (func x)
 
+maybeToBased :: Maybe a -> Based a
+maybeToBased x = maybe Base Original x
 
-data Regex alphabet = Empty 
+data Regex alphabet = Empty
     | FromAlphabet (Augmented alphabet)
     | Union (Regex alphabet) (Regex alphabet)
     | Concatenation (Regex alphabet) (Regex alphabet)
@@ -255,14 +258,14 @@ languageFromRegex (KleeneStar regex) = kleeneStar (languageFromRegex regex)
 
 epsilonNdStateMachineUnion :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Based (Either states1 states2)) alphabet
 epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (EpsilonNDStateMachine trans2 init2 accept2) = EpsilonNDStateMachine trans initState isAccept where
-    initState = Base ()
+    initState = Base
 
-    isAccept (Base ()) = False
+    isAccept Base = False
     isAccept (Original (Left x)) = accept1 x
     isAccept (Original (Right x)) = accept2 x
 
-    trans Epsilon (Base ()) = Set.union (fmap (Original . Left) (Set.singleton init1)) (fmap (Original . Right) (Set.singleton init2))
-    trans (Simply _letter) (Base ()) = fmap Base Set.empty -- use of Base here is arbitrary, could use Original . Left or Original . Right
+    trans Epsilon Base = Set.union (fmap (Original . Left) (Set.singleton init1)) (fmap (Original . Right) (Set.singleton init2))
+    trans (Simply _letter) Base = fmap Base Set.empty -- use of Base here is arbitrary, could use Original . Left or Original . Right
     trans letter (Original (Left state)) = fmap (Original. Left) (trans1 letter state)
     trans letter (Original (Right state)) = fmap (Original . Right) (trans2 letter state)
 
@@ -288,49 +291,90 @@ epsilonNdStateMachineConcatenationWrapper (EraseStates machine1) (EraseStates ma
 epsilonNdStateMachineKleeneStar :: (Ord states) => EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine (Based states) alphabet
 epsilonNdStateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) = EpsilonNDStateMachine kleeneTrans kleeneInitial isKleeneAccept where
 
-    isKleeneAccept (Base ()) = False
+    isKleeneAccept Base = False
     isKleeneAccept (Original x) = isAccept x
 
-    kleeneInitial = Base ()
+    kleeneInitial = Base
 
-    kleeneTrans Epsilon (Base ()) = Set.singleton (Original initial)
-    kleeneTrans (Simply _letter) (Base ()) = Set.empty
+    kleeneTrans Epsilon Base = Set.singleton (Original initial)
+    kleeneTrans (Simply _letter) Base = Set.empty
     kleeneTrans Epsilon (Original state) = if isAccept state then Set.union (Set.singleton (Original initial)) (fmap Original (trans Epsilon state)) else fmap Original (trans Epsilon state)
     kleeneTrans (Simply letter) (Original state) = fmap Original (trans (Simply letter) state)
 
 epsilonNdStateMachineKleeneStarWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
 epsilonNdStateMachineKleeneStarWrapper (EraseStates machine) = EraseStates (epsilonNdStateMachineKleeneStar machine)
 
--- the return type of statemachineFromRegex should be parameterised by the input value
--- this is because different regexes require different state types
--- however, Haskell cannot achieve this because it does not have dependent types
+-- The return type of statemachineFromRegex should be parameterised by the input value
+-- This is because different regexes require different state types
+-- However, Haskell cannot achieve this because it does not have dependent types
 -- Instead, we fudge things with existential types - we know that *some* state type with the right constraints exists
 -- and that's good enough
 data AgnosticStateMachine alphabet = forall states. (Ord states) => EraseStates (EpsilonNDStateMachine states alphabet)
 
 stateMachineFromRegex :: (Eq alphabet) => Regex alphabet ->  AgnosticStateMachine alphabet
-stateMachineFromRegex Empty = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+stateMachineFromRegex Empty = EraseStates (EpsilonNDStateMachine trans initial isAccept) where
     initial = ()
     isAccept = const False
     trans _letter  () = Set.singleton ()
 
-stateMachineFromRegex (FromAlphabet Epsilon) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+stateMachineFromRegex (FromAlphabet Epsilon) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where
     initial = True
     isAccept = (== True)
     trans _letter True = Set.singleton False
     trans _letter False = Set.singleton False
 
-stateMachineFromRegex (FromAlphabet (Simply targetLetter)) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where 
+stateMachineFromRegex (FromAlphabet (Simply targetLetter)) = EraseStates (EpsilonNDStateMachine trans initial isAccept) where
     initial = False
     isAccept = (== True)
     trans letter False = if letter == Simply targetLetter then Set.singleton True else Set.empty
     trans _letter True = Set.empty
-    
+
 
 stateMachineFromRegex (Union regex1 regex2) = epsilonNdStateMachineUnionWrapper (stateMachineFromRegex regex1) (stateMachineFromRegex regex2)
 stateMachineFromRegex (Concatenation regex1 regex2) = epsilonNdStateMachineConcatenationWrapper (stateMachineFromRegex regex1) (stateMachineFromRegex regex2)
-stateMachineFromRegex (KleeneStar regex) = epsilonNdStateMachineKleeneStarWrapper (stateMachineFromRegex regex) 
+stateMachineFromRegex (KleeneStar regex) = epsilonNdStateMachineKleeneStarWrapper (stateMachineFromRegex regex)
 
+-- Converting a state machine to a regex is the first place where we really 
+-- need finiteness in order to even write something sensible down
+-- (epsilon non-deterministic state machines need finiteness 
+-- to guarantee halting, but we can just choose for them to
+-- loop infintely in the bad infinite case)
+
+data FiniteStateMachine states alphabet = FiniteStateMachine {
+    finiteTransitionFunction :: Map.Map alphabet (Map.Map states states),
+    finiteInitialState :: states,
+    finiteIsAcceptState :: Set.Set states
+} deriving (Show, Ord, Eq)
+
+foo :: Map.Map a (Map.Map b c) -> a -> b -> Maybe c
+foo mmap key1 key2 = maybeLookup key2 (Map.lookup key1 mmap)
+
+maybeLookup :: key -> Maybe (Map.Map key value) -> Maybe value
+maybeLookup _key Nothing = Nothing
+maybeLookup key (Just mmap) = Map.lookup key mmap
+
+-- convert finite state machine into state machine
+forgetFiniteness :: FiniteStateMachine states alphabet-> StateMachine (Based states) alphabet
+forgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = StateMachine fTransition fInitial fAcceptState where
+    fTransition letter (Original state) = maybeToBased (maybeLookup state (Map.lookup letter transitionMap) )
+    fTransition _letter Base = Base
+    fInitial = Original initial 
+    fAcceptState = flip Set.member (fmap Original acceptStates)
+
+-- convert finite state machine into non-deterministic state machine
+-- this non-deterministic state machine only uses a very small amount of the
+-- power of the definition viz. to create a default "failure" path through
+-- the execution
+ndForgetFiniteness :: FiniteStateMachine states alphabet-> NDStateMachine states alphabet
+ndForgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = NDStateMachine fTransition initial (flip Set.member acceptStates) where
+    fTransition letter state = maybe Set.empty Set.singleton (maybeLookup state (Map.lookup letter transitionMap))
+
+
+-- Sipser uses *another* kind of state machine as a helper definition in the construction of a regex from an automaton
+-- we will avoid this by the magic of recursion and higher-order functions
+
+regexFromStateMachine :: FiniteStateMachine alphabet states -> Regex alphabet
+regexFromStateMachine = undefined
 
 data GoodStates = Start
     | G
@@ -339,7 +383,6 @@ data GoodStates = Start
     | D
     | Bin
     deriving (Show, Eq, Ord)
-
 
 testMachine1 :: EpsilonNDStateMachine GoodStates Char
 testMachine1 = EpsilonNDStateMachine trans initial isAccept where
@@ -375,7 +418,7 @@ testMachine3 = StateMachine trans initial isAccept where
     trans _letter _state = Bin
 
 testMachine4 :: EpsilonNDStateMachine Bool Char
-testMachine4 = EpsilonNDStateMachine trans initial isAccept where 
+testMachine4 = EpsilonNDStateMachine trans initial isAccept where
     initial = False
     isAccept = (== True)
     trans letter False = if letter == Simply 'k' then Set.singleton True else Set.empty
