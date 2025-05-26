@@ -6,7 +6,6 @@ import qualified Data.Map as Map
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
-import Data.Maybe (fromMaybe)
 data Json = Null
     | JsonBool Bool
     | JsonString String
@@ -265,7 +264,7 @@ epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (Epsilon
     isAccept (Original (Right x)) = accept2 x
 
     trans Epsilon Base = Set.union (fmap (Original . Left) (Set.singleton init1)) (fmap (Original . Right) (Set.singleton init2))
-    trans (Simply _letter) Base = fmap Base Set.empty -- use of Base here is arbitrary, could use Original . Left or Original . Right
+    trans (Simply _letter) Base = fmap (Original . Left) Set.empty -- use of Original . Left here is arbitrary, could use Original . Right
     trans letter (Original (Left state)) = fmap (Original. Left) (trans1 letter state)
     trans letter (Original (Right state)) = fmap (Original . Right) (trans2 letter state)
 
@@ -346,15 +345,12 @@ data FiniteStateMachine states alphabet = FiniteStateMachine {
     finiteIsAcceptState :: Set.Set states
 } deriving (Show, Ord, Eq)
 
-foo :: Map.Map a (Map.Map b c) -> a -> b -> Maybe c
-foo mmap key1 key2 = maybeLookup key2 (Map.lookup key1 mmap)
-
-maybeLookup :: key -> Maybe (Map.Map key value) -> Maybe value
+maybeLookup :: (Ord key) => key -> Maybe (Map.Map key value) -> Maybe value
 maybeLookup _key Nothing = Nothing
 maybeLookup key (Just mmap) = Map.lookup key mmap
 
 -- convert finite state machine into state machine
-forgetFiniteness :: FiniteStateMachine states alphabet-> StateMachine (Based states) alphabet
+forgetFiniteness :: (Ord states, Ord alphabet) => FiniteStateMachine states alphabet-> StateMachine (Based states) alphabet
 forgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = StateMachine fTransition fInitial fAcceptState where
     fTransition letter (Original state) = maybeToBased (maybeLookup state (Map.lookup letter transitionMap) )
     fTransition _letter Base = Base
@@ -365,7 +361,7 @@ forgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = State
 -- this non-deterministic state machine only uses a very small amount of the
 -- power of the definition viz. to create a default "failure" path through
 -- the execution
-ndForgetFiniteness :: FiniteStateMachine states alphabet-> NDStateMachine states alphabet
+ndForgetFiniteness :: (Ord states, Ord alphabet) => FiniteStateMachine states alphabet-> NDStateMachine states alphabet
 ndForgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = NDStateMachine fTransition initial (flip Set.member acceptStates) where
     fTransition letter state = maybe Set.empty Set.singleton (maybeLookup state (Map.lookup letter transitionMap))
 
