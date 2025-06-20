@@ -19,7 +19,7 @@ data Json = Null
 data StateMachine states alphabet = StateMachine {
     transitionFunction :: alphabet -> states -> states,
     initialState :: states,
-    isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite lists to perform the subset construction
+    isAcceptState :: states -> Bool -- a mathematician might make this a set of accept states, but we need infinite sets to perform the subset construction
 }
 
 -- performs a foldl and puts intermediate values into a list
@@ -107,7 +107,7 @@ ndInclusion (StateMachine t i a) = NDStateMachine expandedTransition i a where
 subsetConstruction :: NDStateMachine states alphabet -> StateMachine (Set.Set states) alphabet
 subsetConstruction (NDStateMachine t i acceptFunc) = StateMachine (ndFlatten t)  (return i) (any acceptFunc)
 
--- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their function
+-- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their purpose
 data Augmented alphabet = Simply alphabet | Epsilon deriving (Eq, Ord, Show)
 
 -- variant of non-deterministic state machine with "null" paths
@@ -128,7 +128,7 @@ stabiliseList :: (Eq b) => (b -> [b]) -> b -> [b]
 stabiliseList func b = join (stabiliseFunc (join . fmap func) [b])
 
 -- iterate and put values into set until output stabilises
--- This is a horrible definition - should be able to do this "natively" on sets
+-- (This is a horrible definition - should be able to do this "natively" on sets
 -- I've not got a good handle on how to generalise unfold yet...)
 stabilise :: (Ord b) => (b -> Set.Set b) -> b -> Set.Set b
 stabilise function element = Set.fromList (stabiliseList (Set.toList . function) element)
@@ -154,8 +154,7 @@ epsilonNdExhibitSuccess _ _ _ = False
 -- maybe this can be cleaned up somehow
 epsilonNdCompute :: (Ord states) => EpsilonNDStateMachine states alphabet -> [alphabet] -> Set.Set states
 epsilonNdCompute (EpsilonNDStateMachine t i _as) = augmentedFoldl (flip flattenedTransition) (return i) where
-    --flattenedTransition letter stateSet = join (fmap (epsilonClosure t) ((join . fmap (t  letter)) stateSet))
-    flattenedTransition letter stateSet = epsilonClosure t =<< t  letter =<< stateSet
+    flattenedTransition letter states = epsilonClosure t =<< t  letter =<< states
     augmentedFoldl f = foldl g where
         g y x = f y (Simply x)
 
@@ -271,7 +270,6 @@ epsilonNdStateMachineUnion (EpsilonNDStateMachine trans1 init1 accept1) (Epsilon
 epsilonNdStateMachineUnionWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
 epsilonNdStateMachineUnionWrapper (EraseStates machine1) (EraseStates machine2) = EraseStates (epsilonNdStateMachineUnion machine1 machine2)
 
-
 epsilonNdStateMachineConcatenation :: (Ord states1, Ord states2) => EpsilonNDStateMachine states1 alphabet -> EpsilonNDStateMachine states2 alphabet -> EpsilonNDStateMachine (Either states1 states2) alphabet
 epsilonNdStateMachineConcatenation (EpsilonNDStateMachine transLeft initLeft acceptLeft) (EpsilonNDStateMachine transRight initRight acceptRight)  = EpsilonNDStateMachine trans initial acceptstates where
     initial = Left initLeft
@@ -302,6 +300,10 @@ epsilonNdStateMachineKleeneStar (EpsilonNDStateMachine trans initial isAccept) =
 
 epsilonNdStateMachineKleeneStarWrapper :: AgnosticStateMachine alphabet -> AgnosticStateMachine alphabet
 epsilonNdStateMachineKleeneStarWrapper (EraseStates machine) = EraseStates (epsilonNdStateMachineKleeneStar machine)
+
+
+--functionWrapper :: AgnosticStateMachine alphabet -> (EpsilonNDStateMachine states alphabet -> EpsilonNDStateMachine states alphabet) -> AgnosticStateMachine alphabet
+--functionWrapper (EraseStates machine) func = EraseStates (func machine)
 
 -- The return type of statemachineFromRegex should be parameterised by the input value
 -- This is because different regexes require different state types
@@ -354,23 +356,78 @@ forgetFiniteness :: (Ord states, Ord alphabet) => FiniteStateMachine states alph
 forgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = StateMachine fTransition fInitial fAcceptState where
     fTransition letter (Original state) = maybeToBased (maybeLookup state (Map.lookup letter transitionMap) )
     fTransition _letter Base = Base
-    fInitial = Original initial 
+    fInitial = Original initial
     fAcceptState = flip Set.member (fmap Original acceptStates)
 
 -- convert finite state machine into non-deterministic state machine
 -- this non-deterministic state machine only uses a very small amount of the
 -- power of the definition viz. to create a default "failure" path through
 -- the execution
-ndForgetFiniteness :: (Ord states, Ord alphabet) => FiniteStateMachine states alphabet-> NDStateMachine states alphabet
+ndForgetFiniteness :: (Ord states, Ord alphabet) => FiniteStateMachine states alphabet -> NDStateMachine states alphabet
 ndForgetFiniteness (FiniteStateMachine transitionMap initial acceptStates) = NDStateMachine fTransition initial (flip Set.member acceptStates) where
     fTransition letter state = maybe Set.empty Set.singleton (maybeLookup state (Map.lookup letter transitionMap))
 
 
--- Sipser uses *another* kind of state machine as a helper definition in the construction of a regex from an automaton
--- we will avoid this by the magic of recursion and higher-order functions
+data GNFA states alphabet = GNFA {
+    transitionRegexes :: Map.Map (states, states) (Regex alphabet),
+    generalisedInitialState :: Set.Set states,
+    generalisedIsAcceptState :: Set.Set states
+}
+
+stateSet :: (Ord states) => GNFA states alphabet -> Set.Set states
+stateSet (GNFA t _i _a) = Set.fromList ((\ (state1, state2) -> [state1, state2]) =<< Map.keys t)
+
+-- turn "Nothing" in map into empty regex
+--normaliseGNFA :: GNFA states alphabet -> GNFA states alphabet
+--normaliseGNFA (GNFA trans initial isAccept) = GNFA normalisedTrans initial isAccept where
+--    normalisedTrans = foldr 
 
 regexFromStateMachine :: FiniteStateMachine alphabet states -> Regex alphabet
 regexFromStateMachine = undefined
+
+
+data CFG variables terminals = CFG {
+    cfgStart :: variables,
+    cfgRules :: (variables, [Either variables terminals])
+}
+
+data PushdownAutomata states alphabet stack= PushdownAutomata {
+    pushdownTransitionFunction :: Augmented alphabet -> states -> Augmented stack -> Set.Set (states, Augmented stack),
+    pushdownInitialState :: states,
+    isPushdownAcceptState :: states -> Bool
+}
+
+--really just a domain-specific re-implementation of listToMaybe
+pop :: [alphabet] -> (Augmented alphabet, [alphabet])
+pop [] = (Epsilon, [])
+pop (a:as) = (Simply a, as)
+
+push :: Augmented alphabet -> [alphabet] -> [alphabet]
+push Epsilon as = as
+push (Simply x) as = x:as
+
+-- I can no longer be bothered to write the unfold function - I need to improve the ones I have already written anyway
+
+pushdownExhibitSingleStep :: (Ord states, Ord stack) => PushdownAutomata states alphabet stack -> (states, states) -> ([stack], [stack]) -> Augmented alphabet -> Augmented stack -> Bool
+pushdownExhibitSingleStep (PushdownAutomata t _i _a) (state1, state2) (stack1, stack2) letter augHead = any match (t letter state1 augHead) where
+    match (state, augNewHead) = state == state2 && push augNewHead stack2 == push augHead stack1
+
+pushdownExhibitCompute :: (Ord states, Ord stack) => PushdownAutomata states alphabet stack -> [states] -> [[stack]] -> [Augmented alphabet] -> [Augmented stack] -> Bool
+pushdownExhibitCompute _ [_s] [] [] [] = True
+pushdownExhibitCompute pa (state1:state2:states) (stack1:stack2:stack) (letter:letters) (topstack:topstackrest) =  pushdownExhibitSingleStep pa (state1, state2) (stack1, stack2) letter topstack && pushdownExhibitCompute pa (state2:states) (stack2:stack) letters topstackrest
+pushdownExhibitCompute _ _ _ _ _ = False
+
+pushdownExhibitAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
+pushdownExhibitAccept = undefined
+
+-- computes the outcome of a state machine 
+pushdownCompute :: PushdownAutomata states alphabet stack -> [alphabet] -> states
+pushdownCompute = undefined
+
+
+-- Checks whether a state machine accepts a word
+pushdownAccept :: PushdownAutomata states alphabet stack -> [alphabet] -> Bool
+pushdownAccept = undefined
 
 data GoodStates = Start
     | G
