@@ -6,6 +6,8 @@ import qualified Data.Map as Map
 import qualified Data.Set.Monad as Set--implements monad on Set
 import Control.Monad
 import Data.List
+import Data.Maybe (catMaybes, mapMaybe)
+import Data.Bits (Bits(xor))
 data Json = Null
     | JsonBool Bool
     | JsonString String
@@ -109,6 +111,13 @@ subsetConstruction (NDStateMachine t i acceptFunc) = StateMachine (ndFlatten t) 
 
 -- yes, this is essentially just (haha) Maybe, but it's nice to make our types descriptive of their purpose
 data Augmented alphabet = Simply alphabet | Epsilon deriving (Eq, Ord, Show)
+
+augToMaybe :: Augmented a -> Maybe a
+augToMaybe (Simply x) = Just x
+augToMaybe Epsilon = Nothing
+
+augReduce :: [Augmented a] -> [a]
+augReduce x = mapMaybe augToMaybe x
 
 -- variant of non-deterministic state machine with "null" paths
 -- note that this is not equivalent to a non-deterministic state machine over arbitrary types
@@ -414,11 +423,17 @@ pushdownExhibitSingleStep (PushdownAutomata t _i _a) (state1, state2) (stack1, s
 
 pushdownExhibitCompute :: (Ord states, Ord stack) => PushdownAutomata states alphabet stack -> [states] -> [[stack]] -> [Augmented alphabet] -> [Augmented stack] -> Bool
 pushdownExhibitCompute _ [_s] [] [] [] = True
-pushdownExhibitCompute pa (state1:state2:states) (stack1:stack2:stack) (letter:letters) (topstack:topstackrest) =  pushdownExhibitSingleStep pa (state1, state2) (stack1, stack2) letter topstack && pushdownExhibitCompute pa (state2:states) (stack2:stack) letters topstackrest
+pushdownExhibitCompute pa (state1:state2:states) (stack1:stack2:stack) (letter:letters) (topstack:topstackrest) = pushdownExhibitSingleStep pa (state1, state2) (stack1, stack2) letter topstack && pushdownExhibitCompute pa (state2:states) (stack2:stack) letters topstackrest
 pushdownExhibitCompute _ _ _ _ _ = False
 
-pushdownExhibitAccept :: (Ord states) => StateMachine states alphabet -> [alphabet] -> [states] -> Bool
-pushdownExhibitAccept = undefined
+pushdownExhibitComputeToAcceptState :: (Ord states, Ord stack) => PushdownAutomata states alphabet stack -> [states] -> [[stack]] -> [Augmented alphabet] -> [Augmented stack] -> Bool
+pushdownExhibitComputeToAcceptState (PushdownAutomata _t _i a) [s] [] [] [] = a s
+pushdownExhibitComputeToAcceptState pa (state1:state2:states) (stack1:stack2:stack) (letter:letters) (topstack:topstackrest) = pushdownExhibitSingleStep pa (state1, state2) (stack1, stack2) letter topstack && pushdownExhibitCompute pa (state2:states) (stack2:stack) letters topstackrest
+pushdownExhibitComputeToAcceptState _ _ _ _ _ = False
+
+pushdownExhibitAccept :: (Ord states, Ord stack, Eq alphabet) => PushdownAutomata states alphabet stack -> [alphabet] -> [states] -> [[stack]] -> [Augmented alphabet] -> [Augmented stack] -> Bool
+pushdownExhibitAccept pa@(PushdownAutomata _t i _a) word (state:states) stacks augWord stackHeads = augReduce augWord == word && state == i && pushdownExhibitComputeToAcceptState pa states stacks augWord stackHeads
+pushdownExhibitAccept _ _ _ _ _ _= False
 
 -- computes the outcome of a state machine 
 pushdownCompute :: PushdownAutomata states alphabet stack -> [alphabet] -> states
